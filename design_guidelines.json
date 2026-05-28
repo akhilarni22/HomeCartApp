@@ -1,0 +1,148 @@
+{
+  "theme": "light",
+  "archetype": "1 - Organic & Earthy",
+  "mood": "Calm, grounded, tactile, and trustworthy with high-contrast data functionality",
+  "colors": {
+    "background": {
+      "primary": "#FDFBF7",
+      "secondary": "#F4F1EA",
+      "card": "#FFFFFF",
+      "overlay": "rgba(253, 251, 247, 0.7)"
+    },
+    "text": {
+      "primary": "#1A3626",
+      "secondary": "#4A5D4E",
+      "muted": "#8F9C93",
+      "inverse": "#FDFBF7"
+    },
+    "brand": {
+      "primary": "#1A3626",
+      "secondary": "#4A5D4E",
+      "accent": "#FF6B35"
+    },
+    "border": {
+      "default": "#E8E5DC",
+      "active": "#4A5D4E"
+    },
+    "status": {
+      "success": "#2D6A4F",
+      "warning": "#FFB703",
+      "danger": "#D90429",
+      "best_deal": "#FF6B35"
+    }
+  },
+  "typography": {
+    "fonts": {
+      "heading": "'Cabinet Grotesk', sans-serif",
+      "body": "'Work Sans', sans-serif",
+      "mono": "'JetBrains Mono', monospace"
+    },
+    "hierarchy": {
+      "h1": "text-4xl sm:text-5xl lg:text-6xl font-black tracking-tight leading-none text-[#1A3626]",
+      "h2": "text-2xl sm:text-3xl lg:text-4xl font-bold tracking-tight text-[#1A3626]",
+      "h3": "text-xl sm:text-2xl font-semibold tracking-tight text-[#1A3626]",
+      "h4": "text-lg sm:text-xl font-medium text-[#1A3626]",
+      "body": "text-base font-normal leading-relaxed text-[#4A5D4E]",
+      "small": "text-sm font-medium text-[#8F9C93]",
+      "overline": "text-xs font-bold uppercase tracking-[0.2em] text-[#8F9C93]"
+    }
+  },
+  "spacing_and_layout": {
+    "container": "w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8",
+    "section_padding": "py-12 sm:py-16 lg:py-24",
+    "item_gap": "gap-6 sm:gap-8",
+    "grid_strategy": {
+      "dashboard_main": "grid grid-cols-1 lg:grid-cols-12 gap-8 (Bento Layout)",
+      "list_items": "flex flex-col gap-4",
+      "price_comparison": "grid grid-cols-2 md:grid-cols-3 gap-4 (Control Room Grid)"
+    },
+    "alignment": "Strictly left-aligned for lists and dense content. Center only for empty state hero imagery and top-level branding."
+  },
+  "components": {
+    "cards": {
+      "style": "bg-[#FFFFFF] border border-[#E8E5DC] rounded-xl sm:rounded-2xl p-6 sm:p-8",
+      "interaction": "transition-transform duration-200 hover:-translate-y-1 hover:shadow-[0_8px_30px_rgba(26,54,38,0.06)]"
+    },
+    "buttons": {
+      "primary": "bg-[#1A3626] text-[#FDFBF7] rounded-lg px-6 py-3 font-medium transition-colors hover:bg-[#2D6A4F] hover:text-[#FFFFFF] data-testid-ready",
+      "secondary": "bg-[#F4F1EA] text-[#1A3626] border border-[#E8E5DC] rounded-lg px-6 py-3 font-medium transition-colors hover:bg-[#E8E5DC] hover:text-[#1A3626] data-testid-ready",
+      "accent": "bg-[#FF6B35] text-[#FFFFFF] rounded-lg px-6 py-3 font-bold shadow-sm transition-transform hover:scale-105 data-testid-ready"
+    },
+    "inputs": {
+      "style": "w-full bg-[#FDFBF7] border-b-2 border-[#E8E5DC] px-0 py-3 text-lg focus:outline-none focus:border-[#1A3626] transition-colors rounded-none placeholder:text-[#8F9C93]"
+    },
+    "checkbox": {
+      "style": "h-6 w-6 rounded-full border-2 border-[#E8E5DC] data-[state=checked]:bg-[#1A3626] data-[state=checked]:border-[#1A3626] text-white transition-all"
+    },
+    "navigation": {
+      "mobile_bottom": "fixed bottom-0 left-0 right-0 z-50 bg-[#FDFBF7]/80 backdrop-blur-xl border-t border-[#E8E5DC] px-6 py-4 flex justify-around items-center"
+    }
+  },
+  "visual_effects": {
+    "shadows": {
+      "sm": "0 2px 8px rgba(26,54,38,0.04)",
+      "md": "0 8px 24px rgba(26,54,38,0.08)",
+      "lg": "0 16px 48px rgba(26,54,38,0.12)"
+    },
+    "glassmorphism": "bg-[#FDFBF7]/80 backdrop-blur-2xl border border-[#FFFFFF]/40 shadow-sm"
+  },
+  "media": {
+    "images": [
+      {
+        "id": "category_medicines",
+        "url": "https://static.prod-images.emergentagent.com/jobs/6572fb12-e787-4b88-a1d9-ee34d1031f5a/images/95e93359d3ba619ca3d67342424873e2eb4b2adb691ae8691fc4d65173abaff6.png",
+        "category": "category_header",
+        "description": "Minimalist stacked white pebbles on sage background. Use for Medicine section header or category card background."
+      },
+      {
+        "id": "hero_empty_state",
+        "url": "https://static.prod-images.emergentagent.com/jobs/6572fb12-e787-4b88-a1d9-ee34d1031f5a/images/45558b082f86fbeae04ec05efbe5823b588d5c4788738acdf666099a8fa077be.png",
+        "category": "empty_state",
+        "description": "Blank paper list on raw linen. Use for 'No lists yet' or 'Archive empty' screens with text overlaid."
+      },
+      {
+        "id": "category_vegetables",
+        "url": "https://static.prod-images.emergentagent.com/jobs/6572fb12-e787-4b88-a1d9-ee34d1031f5a/images/1410f0372970bfc2864adfebd4cfc11949e2b59e653a3b8403bb909a4506a219.png",
+        "category": "category_header",
+        "description": "Crisp green moss sphere on warm sand. Use for Vegetables section header or category card."
+      },
+      {
+        "id": "category_groceries",
+        "url": "https://static.prod-images.emergentagent.com/jobs/6572fb12-e787-4b88-a1d9-ee34d1031f5a/images/029e95aa4f9e3a50c4bd581524bec420fe7ab6197b7221b992b348cfcf9f21a9.png",
+        "category": "category_header",
+        "description": "Terracotta clay bowl on bone-white surface. Use for Groceries section header or category card."
+      }
+    ],
+    "image_handling_rules": {
+      "overlay": "Use bg-gradient-to-t from-[#1A3626]/60 to-transparent for text contrast over category images.",
+      "radius": "Images in cards must match parent radius or use rounded-xl."
+    }
+  },
+  "testing": {
+    "attributes": [
+      "All buttons must have data-testid='[action]-button'",
+      "All inputs must have data-testid='[field]-input'",
+      "All list items must have data-testid='list-item-[id]'",
+      "Price comparison triggers must have data-testid='compare-prices-[item-id]'"
+    ]
+  },
+  "dependencies_to_install": [
+    "@phosphor-icons/react",
+    "framer-motion",
+    "date-fns",
+    "clsx",
+    "tailwind-merge"
+  ],
+  "instructions_to_main_agent": [
+    "Strictly follow the color palette. DO NOT USE DEFAULT TAILWIND BLUE, GRAY, OR PURPLE.",
+    "Implement the UI for React using Tailwind CSS and raw HTML where Shadcn components are too restrictive. Only use Shadcn for complex interactions like Dialogs or Dropdowns.",
+    "For the main Shopping List view, use an asymmetrical bento grid on Desktop, but a clean list view on mobile. The list items must have Generous padding (p-4 or p-6).",
+    "When a user selects an item, the Price Comparison view should open in a Glassmorphism Drawer or Modal, using the 'Control Room Grid' layout (dense, edge-to-edge data) for comparing Amazon Fresh, Blinkit, etc.",
+    "Apply 'Electric Tangerine' (#FF6B35) strictly for marking the 'Best Deal' or highlighting savings.",
+    "Ensure the layout is highly responsive. The Bottom Navigation must be sticky on mobile, but transformed into a left sidebar on Desktop.",
+    "Use @phosphor-icons/react for icons to match the tactile, organic feel (Duotone weight preferred).",
+    "Use Work Sans for all body text and Cabinet Grotesk for Headings. Enforce tracking-tight on all Headings.",
+    "For the MVP, mock the price data from the 6 platforms, but make the UI look like real production data with proper loading states (skeleton screens using the secondary background color).",
+    "DO NOT use placeholder image URLs. Use the exact URLs provided in the media section of this JSON."
+  ]
+}
