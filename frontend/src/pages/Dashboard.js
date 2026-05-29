@@ -8,6 +8,7 @@ import {
 } from '@phosphor-icons/react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Button } from '../components/ui/button';
+import analytics from '../utils/analytics';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const CATEGORIES = [
@@ -46,6 +47,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     loadHomes();
+    analytics.page('App', 'Dashboard', { path: '/dashboard', title: 'HomeCart — Dashboard' });
   }, []);
 
   useEffect(() => {
@@ -137,7 +139,18 @@ export default function Dashboard() {
     e.preventDefault();
     setLoading(true);
     try {
-      await axios.post(`${API}/homes`, homeForm, { withCredentials: true });
+      const { data: newHome } = await axios.post(`${API}/homes`, homeForm, { withCredentials: true });
+      analytics.track('Home Created', {
+        home_id: newHome.home_id,
+        home_name: newHome.home_name,
+        is_custom_id: Boolean(homeForm.home_id),
+      });
+      analytics.group(newHome.home_id, {
+        home_id: newHome.home_id,
+        home_name: newHome.home_name,
+        members_count: 1,
+        action: 'created',
+      });
       await loadHomes();
       setShowCreateHome(false);
       setHomeForm({ home_name: '', home_id: '' });
@@ -151,7 +164,15 @@ export default function Dashboard() {
     e.preventDefault();
     setLoading(true);
     try {
-      await axios.post(`${API}/homes/join`, { home_id: joinHomeId }, { withCredentials: true });
+      const { data: joinedHome } = await axios.post(`${API}/homes/join`, { home_id: joinHomeId }, { withCredentials: true });
+      analytics.track('Home Joined', {
+        home_id: joinHomeId,
+      });
+      analytics.group(joinHomeId, {
+        home_id: joinHomeId,
+        home_name: joinedHome?.home_name || joinHomeId,
+        action: 'joined',
+      });
       await loadHomes();
       setShowJoinHome(false);
       setJoinHomeId('');
@@ -166,6 +187,11 @@ export default function Dashboard() {
     setLoading(true);
     try {
       const { data } = await axios.post(`${API}/lists`, { frequency: listFrequency, home_id: selectedHome.home_id }, { withCredentials: true });
+      analytics.track('List Created', {
+        list_id: String(data._id),
+        home_id: selectedHome.home_id,
+        frequency: listFrequency,
+      });
       await loadLists();
       setSelectedList(data);
       setShowCreateList(false);
@@ -184,6 +210,16 @@ export default function Dashboard() {
     setLoading(true);
     try {
       await axios.post(`${API}/items`, { ...itemForm, list_id: selectedList._id }, { withCredentials: true });
+      analytics.track('Item Added', {
+        item_name: itemForm.name,
+        category: itemForm.category,
+        quantity: itemForm.quantity,
+        unit: itemForm.unit,
+        list_id: String(selectedList._id),
+        home_id: selectedHome.home_id,
+        list_frequency: selectedList.frequency,
+        from_catalogue: false,
+      });
       await loadItems();
       await loadCatalogue();
       await loadBasketComparison();
@@ -208,6 +244,16 @@ export default function Dashboard() {
         unit: catalogueItem.unit, 
         list_id: selectedList._id 
       }, { withCredentials: true });
+      analytics.track('Item Added', {
+        item_name: catalogueItem.name,
+        category: catalogueItem.category,
+        quantity: 1,
+        unit: catalogueItem.unit,
+        list_id: String(selectedList._id),
+        home_id: selectedHome.home_id,
+        list_frequency: selectedList.frequency,
+        from_catalogue: true,
+      });
       await loadItems();
       await loadBasketComparison();
     } catch (error) {
@@ -218,6 +264,20 @@ export default function Dashboard() {
   async function toggleItemComplete(itemId, completed) {
     try {
       await axios.patch(`${API}/items/${itemId}`, { completed: !completed }, { withCredentials: true });
+      if (!completed) {
+        const item = items.find(i => i._id === itemId);
+        if (item) {
+          analytics.track('Item Completed', {
+            item_id: String(item._id),
+            item_name: item.name,
+            category: item.category,
+            quantity: item.quantity,
+            unit: item.unit,
+            home_id: selectedHome?.home_id,
+            list_id: String(selectedList?._id || ''),
+          });
+        }
+      }
       await loadItems();
       await loadBasketComparison();
     } catch (error) {
@@ -227,7 +287,17 @@ export default function Dashboard() {
 
   async function deleteItem(itemId) {
     try {
+      const item = items.find(i => i._id === itemId);
       await axios.delete(`${API}/items/${itemId}`, { withCredentials: true });
+      if (item) {
+        analytics.track('Item Deleted', {
+          item_id: String(item._id),
+          item_name: item.name,
+          category: item.category,
+          home_id: selectedHome?.home_id,
+          list_id: String(selectedList?._id || ''),
+        });
+      }
       await loadItems();
       await loadBasketComparison();
     } catch (error) {
@@ -239,6 +309,20 @@ export default function Dashboard() {
     if (!selectedList) return;
     try {
       await axios.post(`${API}/lists/${selectedList._id}/archive`, {}, { withCredentials: true });
+      const bestBasket = basketComparison.find(b => b.best);
+      const completedCount = items.filter(i => i.completed).length;
+      const archiveProps = {
+        list_id: String(selectedList._id),
+        home_id: selectedHome?.home_id,
+        frequency: selectedList.frequency,
+        total_items: items.length,
+        completed_items: completedCount,
+        basket_best_total: bestBasket ? bestBasket.total : 0,
+      };
+      if (bestBasket) {
+        archiveProps.basket_best_vendor = bestBasket.vendor;
+      }
+      analytics.track('List Archived', archiveProps);
       await loadLists();
       await loadArchivedLists();
       setSelectedList(null);
@@ -249,6 +333,12 @@ export default function Dashboard() {
   }
 
   async function viewItemPrices(item) {
+    analytics.track('Item Prices Viewed', {
+      item_id: String(item._id),
+      item_name: item.name,
+      category: item.category,
+      home_id: selectedHome?.home_id,
+    });
     setSelectedItemForPrices(item);
     setShowPriceModal(true);
     try {
@@ -261,6 +351,13 @@ export default function Dashboard() {
 
   function shareOnWhatsApp() {
     if (!items.length) return;
+    analytics.track('List Shared', {
+      home_id: selectedHome?.home_id,
+      list_id: String(selectedList?._id || ''),
+      frequency: selectedList?.frequency,
+      item_count: items.length,
+      channel: 'whatsapp',
+    });
     const grouped = CATEGORIES.map(({ id }) => {
       const categoryItems = items.filter(i => i.category === id);
       if (!categoryItems.length) return '';
@@ -444,9 +541,9 @@ export default function Dashboard() {
                           <p className="text-sm font-semibold text-[#1A3626]">{basket.vendor}</p>
                           {basket.best && <span className="text-xs bg-[#FF6B35] text-white px-2 py-0.5 rounded-full font-bold">BEST</span>}
                         </div>
-                        <p className="text-2xl font-bold text-[#1A3626]">₹{basket.total}</p>
+                        <p className="text-2xl font-bold text-[#1A3626]">{String.fromCharCode(8377)}{basket.total}</p>
                         <p className="text-xs text-[#8F9C93] mt-1">
-                          {basket.best ? 'Lowest basket cost' : `₹${basket.savings} more`}
+                          {basket.best ? 'Lowest basket cost' : `${String.fromCharCode(8377)}${basket.savings} more`}
                         </p>
                       </div>
                     ))}
@@ -759,7 +856,7 @@ export default function Dashboard() {
                   <p className="text-sm font-semibold text-[#1A3626]">{offer.vendor}</p>
                   {offer.best && <span className="text-xs bg-[#FF6B35] text-white px-2 py-0.5 rounded-full font-bold">BEST</span>}
                 </div>
-                <p className="text-2xl font-bold text-[#1A3626]">₹{offer.price}</p>
+                <p className="text-2xl font-bold text-[#1A3626]">{String.fromCharCode(8377)}{offer.price}</p>
                 <p className="text-xs text-[#8F9C93] mt-1">ETA: {offer.eta}</p>
                 {offer.coupon && <p className="text-xs text-[#2D6A4F] mt-1 font-medium">{offer.coupon}</p>}
               </a>

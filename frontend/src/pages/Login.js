@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { ShoppingCart } from '@phosphor-icons/react';
+import analytics from '../utils/analytics';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -10,6 +11,10 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    analytics.page('Auth', 'Login', { path: '/login', title: 'HomeCart — Sign In' });
+  }, []);
 
   async function handleSubmit(e) {
     e.preventDefault();
