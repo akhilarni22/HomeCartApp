@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import axios from 'axios';
+import analytics from '../utils/analytics';
 
 const AuthContext = createContext(null);
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -36,6 +37,14 @@ export function AuthProvider({ children }) {
     try {
       const { data } = await axios.post(`${API}/auth/login`, { email, password }, { withCredentials: true });
       setUser(data);
+      analytics.identify(String(data._id), {
+        name: data.name,
+        email: data.email.toLowerCase(),
+      });
+      analytics.track('User Logged In', {
+        user_id: String(data._id),
+        email: data.email.toLowerCase(),
+      });
       return { success: true };
     } catch (e) {
       return { success: false, error: formatApiErrorDetail(e.response?.data?.detail) || e.message };
@@ -46,6 +55,16 @@ export function AuthProvider({ children }) {
     try {
       const { data } = await axios.post(`${API}/auth/register`, { email, password, name }, { withCredentials: true });
       setUser(data);
+      analytics.identify(String(data._id), {
+        name: data.name,
+        email: data.email.toLowerCase(),
+        created_at: new Date().toISOString(),
+      });
+      analytics.track('User Registered', {
+        user_id: String(data._id),
+        name: data.name,
+        email: data.email.toLowerCase(),
+      });
       return { success: true };
     } catch (e) {
       return { success: false, error: formatApiErrorDetail(e.response?.data?.detail) || e.message };

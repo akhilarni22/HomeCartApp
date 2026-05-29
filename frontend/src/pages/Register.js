@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { ShoppingCart } from '@phosphor-icons/react';
+import analytics from '../utils/analytics';
 
 export default function Register() {
   const [email, setEmail] = useState('');
@@ -11,6 +12,10 @@ export default function Register() {
   const [loading, setLoading] = useState(false);
   const { register } = useAuth();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    analytics.page('Auth', 'Register', { path: '/register', title: 'HomeCart — Create Account' });
+  }, []);
 
   async function handleSubmit(e) {
     e.preventDefault();
