@@ -74,6 +74,7 @@ export function AuthProvider({ children }) {
   async function logout() {
     try {
       await axios.post(`${API}/auth/logout`, {}, { withCredentials: true });
+      analytics.reset(); // Clear anonymous ID so next user on this device starts fresh
       setUser(false);
     } catch (e) {
       console.error('Logout failed:', e);

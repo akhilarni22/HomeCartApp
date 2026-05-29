@@ -164,13 +164,15 @@ export default function Dashboard() {
     e.preventDefault();
     setLoading(true);
     try {
-      const { data: joinedHome } = await axios.post(`${API}/homes/join`, { home_id: joinHomeId }, { withCredentials: true });
+      await axios.post(`${API}/homes/join`, { home_id: joinHomeId }, { withCredentials: true });
+      // Read home_name from the already-loaded homes state — the join API only returns {message, home_id}
+      const existingHome = homes.find(h => h.home_id === joinHomeId);
       analytics.track('Home Joined', {
         home_id: joinHomeId,
       });
       analytics.group(joinHomeId, {
         home_id: joinHomeId,
-        home_name: joinedHome?.home_name || joinHomeId,
+        home_name: existingHome?.home_name || '',
         action: 'joined',
       });
       await loadHomes();
