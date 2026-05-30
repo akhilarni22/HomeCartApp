@@ -1,8 +1,8 @@
 # Test Credentials
 
 ## Admin Account
-- Email: akhil.raj@rudderstack.com
-- Password: Admin@123
+- Email: admin@homecart.com
+- Password: admin123
 - Role: admin
 
 ## Auth Endpoints
