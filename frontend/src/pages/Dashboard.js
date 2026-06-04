@@ -19,6 +19,8 @@ const CATEGORIES = [
 
 export default function Dashboard() {
   const { user, logout } = useAuth();
+  const [completedLists, setCompletedLists] = useState([]);
+  const [viewMode, setViewMode] = useState('active'); // active | archived | completed | catalogue
   const [homes, setHomes] = useState([]);
   const [selectedHome, setSelectedHome] = useState(null);
   const [lists, setLists] = useState([]);
@@ -44,6 +46,7 @@ export default function Dashboard() {
   
   const [loading, setLoading] = useState(false);
   const [members, setMembers] = useState([]);
+  const isReadOnlyList = viewMode === 'archived' || viewMode === 'completed';
 
   useEffect(() => {
     loadHomes();
@@ -56,6 +59,7 @@ export default function Dashboard() {
       loadCatalogue();
       loadMembers();
       loadArchivedLists();
+      loadCompletedLists();
     }
   }, [selectedHome]);
 
@@ -77,6 +81,58 @@ export default function Dashboard() {
       console.error('Failed to load homes:', error);
     }
   }
+  async function openHistoricalList(list, mode) {
+    setSelectedList(list);
+    setViewMode(mode);
+
+    try {
+      const { data } = await axios.get(`${API}/items?list_id=${list._id}`, {
+        withCredentials: true,
+       });
+      setItems(data);
+    } catch (error) {
+      console.error('Failed to load historical list items:', error);
+   }
+ }
+//   async function loadCompletedLists() {
+//   try {
+//     const { data } = await axios.get(`${API}/lists/completed?home_id=${selectedHome.home_id}`, {
+//       withCredentials: true,
+//     });
+//     setCompletedLists(data);
+//   } catch (error) {
+//     console.error('Failed to load completed lists:', error);
+//   }
+// }
+async function loadCompletedLists() {
+  try {
+    const { data } = await axios.get(`${API}/lists/completed?home_id=${selectedHome.home_id}`, {
+      withCredentials: true,
+    });
+    setCompletedLists(data);
+  } catch (error) {
+    console.error('Failed to load completed lists:', error);
+  }
+}
+
+async function completeList() {
+  if (!selectedList) return;
+
+  try {
+    await axios.post(`${API}/lists/${selectedList._id}/complete`, {}, {
+      withCredentials: true,
+    });
+
+    await loadLists();
+    await loadCompletedLists();
+
+    setSelectedList(null);
+    setItems([]);
+    setViewMode('active');
+  } catch (error) {
+    alert(error.response?.data?.detail || 'Failed to complete list');
+  }
+}
 
   async function loadLists() {
     try {
@@ -467,6 +523,12 @@ export default function Dashboard() {
                 </div>
               </div>
 
+              <div>
+                   <Button onClick={() => setViewMode('active')}>Active Lists</Button>
+                    <Button onClick={() => setViewMode('completed')}>Completed Lists</Button>
+                    <Button onClick={() => setViewMode('archived')}>Archived Lists</Button>
+                    <Button onClick={() => setViewMode('catalogue')}>Catalogue</Button>
+              </div>
               {/* Catalogue Search */}
               <div className="bg-white border border-[#E8E5DC] rounded-2xl p-6">
                 <div className="flex items-center gap-2 mb-4">
@@ -495,6 +557,7 @@ export default function Dashboard() {
                       </div>
                       <Plus size={16} className="text-[#1A3626]" />
                     </button>
+                    
                   ))}
                 </div>
               </div>
@@ -502,6 +565,33 @@ export default function Dashboard() {
 
             {/* Main Content */}
             <div className="lg:col-span-9 space-y-6">
+              {viewMode === 'catalogue' ? (
+               <div className="bg-white rounded-3xl p-6 shadow-sm">
+               <h2 className="text-2xl font-bold mb-4">Complete Catalogue</h2>
+               <input
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search catalogue..."
+                  className="w-full border rounded-xl px-4 py-3 mb-4"/>
+
+              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredCatalogue.map(item => (
+                <div key={item._id || item.name} className="border rounded-2xl p-4">
+                <h3 className="font-semibold">{item.name}</h3>
+                <p>{item.category}</p>
+                <p>Default unit: {item.unit}</p>
+                
+                {!isReadOnlyList && selectedList && (
+                    <Button onClick={() => addFromCatalogue(item)}>
+                      Add to Current List
+                    </Button>
+                )}
+                </div>
+            ))}
+            </div>
+            </div>
+          ):(
+            <>
               {/* Stats */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="bg-white border border-[#E8E5DC] rounded-xl p-4">
@@ -566,10 +656,23 @@ export default function Dashboard() {
                         <Share size={16} className="mr-2" />
                         Share
                       </Button>
-                      <Button onClick={archiveList} variant="outline" size="sm" data-testid="archive-list-button">
-                        <Archive size={16} className="mr-2" />
-                        Archive
-                      </Button>
+                      {!isReadOnlyList && (
+                        <Button onClick={completeList} variant="outline" size="sm">
+                        <Check size={16} className="mr-2" />
+                            Complete
+                        </Button>
+                      )}
+                      {!isReadOnlyList && (
+                        <Button
+                          onClick={archiveList}
+                          variant="outline"
+                          size="sm"
+                          data-testid="archive-list-button"
+                          >
+                          <Archive size={16} className="mr-2" />
+                          Archive
+                          </Button>
+                    )}
                     </div>
                   </div>
 
@@ -609,11 +712,17 @@ export default function Dashboard() {
                               >
                                 <div className="flex items-start gap-3">
                                   <button
+                                    disabled={isReadOnlyList}
                                     onClick={() => toggleItemComplete(item._id, item.completed)}
-                                    className={`mt-1 w-6 h-6 rounded-full border-2 flex items-center justify-center ${item.completed ? 'bg-[#2D6A4F] border-[#2D6A4F]' : 'border-[#E8E5DC]'}`}
-                                    data-testid={`complete-${item._id}`}
-                                  >
-                                    {item.completed && <Check size={14} weight="bold" className="text-white" />}
+                                    className={`mt-1 w-6 h-6 rounded-full border-2 flex items-center justify-center ${
+                                      item.completed
+                                        ? 'bg-[#2D6A4F] border-[#2D6A4F]'
+                                        : 'border-[#E8E5DC]'
+                                      } ${isReadOnlyList ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                    >
+                                        {item.completed && (
+                                          <Check size={14} weight="bold" className="text-white" />
+                                        )}
                                   </button>
                                   
                                   <div className="flex-1">
@@ -633,13 +742,15 @@ export default function Dashboard() {
                                     )}
                                   </div>
 
-                                  <button
-                                    onClick={() => deleteItem(item._id)}
-                                    className="p-2 hover:bg-white rounded-lg"
-                                    data-testid={`delete-${item._id}`}
-                                  >
-                                    <Trash size={18} className="text-[#D90429]" />
-                                  </button>
+                                  {!isReadOnlyList && (
+                                    <button
+                                      onClick={() => deleteItem(item._id)}
+                                      className="p-2 hover:bg-white rounded-lg"
+                                      data-testid={`delete-${item._id}`}
+                                    >
+                                  <Trash size={18} className="text-[#D90429]" />
+                                </button>
+                              )}
                                 </div>
                               </motion.div>
                             ))}
@@ -652,27 +763,51 @@ export default function Dashboard() {
               )}
 
               {/* Archives */}
-              {archivedLists.length > 0 && (
+              {viewMode === 'archived' && archivedLists.length > 0 && (
                 <div className="bg-white border border-[#E8E5DC] rounded-2xl p-6">
-                  <div className="flex items-center gap-2 mb-4">
-                    <Archive size={24} weight="duotone" className="text-[#1A3626]" />
-                    <h2 className="text-xl font-bold text-[#1A3626] font-heading">Archived Lists</h2>
-                  </div>
-                  <div className="space-y-2">
+                <div className="flex items-center gap-2 mb-4">
+                <Archive size={24} weight="duotone" className="text-[#1A3626]" />
+                <h2 className="text-xl font-bold text-[#1A3626] font-heading">Archived Lists</h2>
+                </div>
+
+                <div className="space-y-2">
                     {archivedLists.map((list) => (
-                      <div key={list._id} className="flex items-center justify-between bg-[#F4F1EA] rounded-lg p-3" data-testid={`archived-list-${list._id}`}>
+                      <div key={list._id} className="flex items-center justify-between bg-[#F4F1EA] rounded-lg p-3">
                         <div>
-                          <p className="text-sm font-medium text-[#1A3626]">{list.frequency} list</p>
+                          <p className="text-sm font-medium text-[#1A3626]">{list.frequency} List</p>
                           <p className="text-xs text-[#8F9C93]">{list.items_count} items</p>
                         </div>
+                        <Button onClick={() => openHistoricalList(list, 'archived')}>
+                              View
+                        </Button>
+                        {/* {!isReadOnlyList && (
+                           <Button onClick={archiveList} variant="outline" size="sm">
+                            <Archive size={16} className="mr-2" />
+                              Archive
+                           </Button>
+                        )} */}
                       </div>
-                    ))}
-                  </div>
+                   ))}
                 </div>
-              )}
+              </div>
+             )}
+              {/* Completed Lists */}
+              {viewMode === 'completed' && completedLists.map(list => (
+              <div key={list._id}>
+              <p>{list.frequency} List</p>
+              <p>{list.items_count} items</p>
+              <Button onClick={() => openHistoricalList(list, 'completed')}>
+                     View
+              </Button>
+              </div>
+             ))}
+            </>
+          )}
             </div>
           </div>
         )}
+
+
       </main>
 
       {/* Modals */}
