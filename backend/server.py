@@ -254,7 +254,9 @@ async def create_list(req: CreateListRequest, request: Request):
         "frequency": req.frequency,
         "created_by": user["_id"],
         "created_at": datetime.now(timezone.utc),
-        "archived": False
+        "archived": False,
+        "status": "active",
+        "completed_at": None
     }
     result = await db.shopping_lists.insert_one(list_doc)
     list_doc.pop("_id", None)
@@ -288,6 +290,31 @@ async def get_archived_lists(home_id: str, request: Request):
         lst["items_count"] = items_count
     return lists
 
+
+@api_router.get("/lists/completed")
+async def get_completed_lists(home_id: str, request: Request):
+    user = await get_current_user(request)
+
+    is_member = await db.home_members.find_one({
+        "home_id": home_id,
+        "user_id": user["_id"]
+    })
+
+    if not is_member:
+        raise HTTPException(status_code=403, detail="Not a member of this home")
+
+    lists = await db.shopping_lists.find({
+        "home_id": home_id,
+        "status": "completed",
+        "archived": False
+    }).sort("completed_at", -1).to_list(100)
+
+    for lst in lists:
+        lst["_id"] = str(lst["_id"])
+        lst["items_count"] = await db.list_items.count_documents({"list_id": lst["_id"]})
+
+    return lists
+
 @api_router.post("/lists/{list_id}/archive")
 async def archive_list(list_id: str, request: Request):
     user = await get_current_user(request)
@@ -301,6 +328,32 @@ async def archive_list(list_id: str, request: Request):
     
     await db.shopping_lists.update_one({"_id": ObjectId(list_id)}, {"$set": {"archived": True, "archived_at": datetime.now(timezone.utc)}})
     return {"message": "List archived"}
+
+@api_router.post("/lists/{list_id}/complete")
+async def complete_list(list_id: str, request: Request):
+    user = await get_current_user(request)
+
+    lst = await db.shopping_lists.find_one({"_id": ObjectId(list_id)})
+    if not lst:
+        raise HTTPException(status_code=404, detail="List not found")
+
+    is_member = await db.home_members.find_one({
+        "home_id": lst["home_id"],
+        "user_id": user["_id"]
+    })
+
+    if not is_member:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    await db.shopping_lists.update_one(
+        {"_id": ObjectId(list_id)},
+        {"$set": {
+            "status": "completed",
+            "completed_at": datetime.now(timezone.utc)
+        }}
+    )
+
+    return {"message": "List completed"}
 
 # Item endpoints
 @api_router.post("/items")
@@ -389,7 +442,10 @@ async def get_catalogue(home_id: str, request: Request):
     if not is_member:
         raise HTTPException(status_code=403, detail="Not authorized")
     
-    items = await db.catalogue_items.find({"home_id": home_id}, {"_id": 0}).sort("last_used", -1).to_list(1000)
+    items = await db.catalogue_items.find({"home_id": home_id}).sort("last_used", -1).to_list(1000)
+    for item in items:
+        item["_id"] = str(item["_id"])
+        item["last_used"] = item["last_used"].isoformat()
     return items
 
 # Price comparison endpoint
