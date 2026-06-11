@@ -1,0 +1,238 @@
+diff --git a/backend/server.py b/backend/server.py
+index 7b25d01..953e012 100644
+--- a/backend/server.py
++++ b/backend/server.py
+@@ -106,6 +106,24 @@ class UpdateItemRequest(BaseModel):
+ # Price comparison logic (mock)
+ VENDORS = ["Amazon Fresh", "Blinkit", "BigBasket", "JioMart", "Zepto", "Swiggy Instamart"]
+ 
++# Bug #9 fix: real vendor search URLs (replaces previous Google search redirect).
++# Each vendor's product search page is opened with the item name pre-filled.
++# Note: deep-linking directly to the product/checkout page with coupons applied
++# still requires actual scraping or affiliate APIs from each vendor.
++from urllib.parse import quote_plus
++
++def vendor_search_url(vendor: str, item_name: str) -> str:
++    q = quote_plus(item_name)
++    urls = {
++        "Amazon Fresh": f"https://www.amazon.in/s?k={q}&i=amazonfresh",
++        "Blinkit": f"https://blinkit.com/s/?q={q}",
++        "BigBasket": f"https://www.bigbasket.com/ps/?q={q}",
++        "JioMart": f"https://www.jiomart.com/search/{q}",
++        "Zepto": f"https://www.zeptonow.com/search?query={q}",
++        "Swiggy Instamart": f"https://www.swiggy.com/instamart/search?custom_back=true&query={q}",
++    }
++    return urls.get(vendor, f"https://www.google.com/search?q={quote_plus(vendor + ' ' + item_name)}")
++
+ def calculate_price(item_name: str, vendor: str, quantity: float) -> float:
+     seed = sum(ord(ch) for ch in item_name + vendor)
+     base = 35 + (seed % 250)
+@@ -269,7 +287,11 @@ async def get_lists(home_id: str, request: Request):
+     if not is_member:
+         raise HTTPException(status_code=403, detail="Not a member of this home")
+     
+-    lists = await db.shopping_lists.find({"home_id": home_id, "archived": False}).sort("created_at", -1).to_list(100)
++    lists = await db.shopping_lists.find({
++        "home_id": home_id,
++        "archived": False,
++        "$or": [{"status": "active"}, {"status": {"$exists": False}}]
++    }).sort("created_at", -1).to_list(100)
+     for lst in lists:
+         lst["_id"] = str(lst["_id"])
+         items_count = await db.list_items.count_documents({"list_id": lst["_id"]})
+@@ -465,7 +487,13 @@ async def get_item_prices(item_id: str, request: Request):
+         price = calculate_price(item["name"], vendor, item["quantity"])
+         eta = f"{10 + ((len(item['name']) + len(vendor)) % 35)} min"
+         coupon = "Coupon applied" if (len(item['name']) + len(vendor)) % 4 == 0 else ""
+-        prices.append({"vendor": vendor, "price": price, "eta": eta, "coupon": coupon})
++        prices.append({
++            "vendor": vendor,
++            "price": price,
++            "eta": eta,
++            "coupon": coupon,
++            "url": vendor_search_url(vendor, item["name"]),  # Bug #9 fix
++        })
+     
+     min_price = min(p["price"] for p in prices)
+     for p in prices:
+diff --git a/frontend/src/pages/Dashboard.js b/frontend/src/pages/Dashboard.js
+index 84f1f5e..9f7e20e 100644
+--- a/frontend/src/pages/Dashboard.js
++++ b/frontend/src/pages/Dashboard.js
+@@ -55,6 +55,10 @@ export default function Dashboard() {
+ 
+   useEffect(() => {
+     if (selectedHome) {
++      // Bug #4 fix: reset list/item state when switching homes
++      setSelectedList(null);
++      setItems([]);
++      setBasketComparison([]);
+       loadLists();
+       loadCatalogue();
+       loadMembers();
+@@ -81,19 +85,21 @@ export default function Dashboard() {
+       console.error('Failed to load homes:', error);
+     }
+   }
++  // Bug #3 fix: reset selected list / items / basket when switching view modes
++  // so archived/completed state never leaks into the active view (and vice versa).
++  function switchViewMode(newMode) {
++    setSelectedList(null);
++    setItems([]);
++    setBasketComparison([]);
++    setViewMode(newMode);
++  }
++
+   async function openHistoricalList(list, mode) {
+     setSelectedList(list);
+     setViewMode(mode);
+-
+-    try {
+-      const { data } = await axios.get(`${API}/items?list_id=${list._id}`, {
+-        withCredentials: true,
+-       });
+-      setItems(data);
+-    } catch (error) {
+-      console.error('Failed to load historical list items:', error);
+-   }
+- }
++    // Bug #2 (already in earlier review): useEffect on selectedList will
++    // auto-load items and basket — no need to fetch items manually here.
++  }
+ //   async function loadCompletedLists() {
+ //   try {
+ //     const { data } = await axios.get(`${API}/lists/completed?home_id=${selectedHome.home_id}`, {
+@@ -524,10 +530,10 @@ async function completeList() {
+               </div>
+ 
+               <div>
+-                   <Button onClick={() => setViewMode('active')}>Active Lists</Button>
+-                    <Button onClick={() => setViewMode('completed')}>Completed Lists</Button>
+-                    <Button onClick={() => setViewMode('archived')}>Archived Lists</Button>
+-                    <Button onClick={() => setViewMode('catalogue')}>Catalogue</Button>
++                   <Button onClick={() => switchViewMode('active')}>Active Lists</Button>
++                    <Button onClick={() => switchViewMode('completed')}>Completed Lists</Button>
++                    <Button onClick={() => switchViewMode('archived')}>Archived Lists</Button>
++                    <Button onClick={() => switchViewMode('catalogue')}>Catalogue</Button>
+               </div>
+               {/* Catalogue Search */}
+               <div className="bg-white border border-[#E8E5DC] rounded-2xl p-6">
+@@ -763,44 +769,71 @@ async function completeList() {
+               )}
+ 
+               {/* Archives */}
+-              {viewMode === 'archived' && archivedLists.length > 0 && (
+-                <div className="bg-white border border-[#E8E5DC] rounded-2xl p-6">
+-                <div className="flex items-center gap-2 mb-4">
+-                <Archive size={24} weight="duotone" className="text-[#1A3626]" />
+-                <h2 className="text-xl font-bold text-[#1A3626] font-heading">Archived Lists</h2>
+-                </div>
++              {viewMode === 'archived' && (
++                archivedLists.length > 0 ? (
++                  <div className="bg-white border border-[#E8E5DC] rounded-2xl p-6">
++                    <div className="flex items-center gap-2 mb-4">
++                      <Archive size={24} weight="duotone" className="text-[#1A3626]" />
++                      <h2 className="text-xl font-bold text-[#1A3626] font-heading">Archived Lists</h2>
++                    </div>
+ 
+-                <div className="space-y-2">
+-                    {archivedLists.map((list) => (
+-                      <div key={list._id} className="flex items-center justify-between bg-[#F4F1EA] rounded-lg p-3">
+-                        <div>
+-                          <p className="text-sm font-medium text-[#1A3626]">{list.frequency} List</p>
+-                          <p className="text-xs text-[#8F9C93]">{list.items_count} items</p>
++                    <div className="space-y-2">
++                      {archivedLists.map((list) => (
++                        <div key={list._id} className="flex items-center justify-between bg-[#F4F1EA] rounded-lg p-3">
++                          <div>
++                            <p className="text-sm font-medium text-[#1A3626]">{list.frequency} List</p>
++                            <p className="text-xs text-[#8F9C93]">{list.items_count} items</p>
++                          </div>
++                          <Button onClick={() => openHistoricalList(list, 'archived')} variant="outline" size="sm">
++                            View
++                          </Button>
+                         </div>
+-                        <Button onClick={() => openHistoricalList(list, 'archived')}>
+-                              View
+-                        </Button>
+-                        {/* {!isReadOnlyList && (
+-                           <Button onClick={archiveList} variant="outline" size="sm">
+-                            <Archive size={16} className="mr-2" />
+-                              Archive
+-                           </Button>
+-                        )} */}
+-                      </div>
+-                   ))}
+-                </div>
+-              </div>
+-             )}
++                     ))}
++                    </div>
++                  </div>
++                ) : (
++                  // Bug #5 fix: empty state for archived view
++                  <div className="bg-white border border-[#E8E5DC] rounded-2xl p-12 text-center">
++                    <Archive size={48} weight="duotone" className="text-[#8F9C93] mx-auto mb-4" />
++                    <h3 className="text-lg font-bold text-[#1A3626] mb-1">No archived lists yet</h3>
++                    <p className="text-sm text-[#8F9C93]">Lists you archive will appear here for future reference.</p>
++                  </div>
++                )
++              )}
++
+               {/* Completed Lists */}
+-              {viewMode === 'completed' && completedLists.map(list => (
+-              <div key={list._id}>
+-              <p>{list.frequency} List</p>
+-              <p>{list.items_count} items</p>
+-              <Button onClick={() => openHistoricalList(list, 'completed')}>
+-                     View
+-              </Button>
+-              </div>
+-             ))}
++              {viewMode === 'completed' && (
++                completedLists.length > 0 ? (
++                  // Bug #8 fix: proper styling matching the Archived block
++                  <div className="bg-white border border-[#E8E5DC] rounded-2xl p-6">
++                    <div className="flex items-center gap-2 mb-4">
++                      <Check size={24} weight="duotone" className="text-[#2D6A4F]" />
++                      <h2 className="text-xl font-bold text-[#1A3626] font-heading">Completed Lists</h2>
++                    </div>
++
++                    <div className="space-y-2">
++                      {completedLists.map((list) => (
++                        <div key={list._id} className="flex items-center justify-between bg-[#F4F1EA] rounded-lg p-3">
++                          <div>
++                            <p className="text-sm font-medium text-[#1A3626]">{list.frequency} List</p>
++                            <p className="text-xs text-[#8F9C93]">{list.items_count} items</p>
++                          </div>
++                          <Button onClick={() => openHistoricalList(list, 'completed')} variant="outline" size="sm">
++                            View
++                          </Button>
++                        </div>
++                      ))}
++                    </div>
++                  </div>
++                ) : (
++                  // Bug #5 fix: empty state for completed view
++                  <div className="bg-white border border-[#E8E5DC] rounded-2xl p-12 text-center">
++                    <Check size={48} weight="duotone" className="text-[#8F9C93] mx-auto mb-4" />
++                    <h3 className="text-lg font-bold text-[#1A3626] mb-1">No completed lists yet</h3>
++                    <p className="text-sm text-[#8F9C93]">Mark a list as complete to track your purchase history here.</p>
++                  </div>
++                )
++              )}
+             </>
+           )}
+             </div>
+@@ -981,9 +1014,9 @@ async function completeList() {
+           </DialogHeader>
+           <div className="grid grid-cols-2 gap-3">
+             {itemPrices.map((offer) => (
+-              <a
++            <a
+                 key={offer.vendor}
+-                href={`https://www.google.com/search?q=${encodeURIComponent(offer.vendor + ' ' + (selectedItemForPrices?.name || ''))}`}
++                href={offer.url || `https://www.google.com/search?q=${encodeURIComponent(offer.vendor + ' ' + (selectedItemForPrices?.name || ''))}`}
+                 target="_blank"
+                 rel="noreferrer"
+                 className={`border-2 rounded-xl p-4 price-card ${offer.best ? 'border-[#FF6B35] bg-[#FF6B35]/5' : 'border-[#E8E5DC]'}`}

@@ -1,12 +1,16 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import axios from 'axios';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ShoppingCart, House, Plus, Trash, Archive, Check, Share, MagnifyingGlass, 
-  CaretDown, X, List as ListIcon, User, SignOut, Tag, ArrowsClockwise, Package, Pill, Carrot, Grains
+  CaretDown, X, List as ListIcon, User, SignOut, Tag, ArrowsClockwise, Package, Pill, Carrot, Grains, Copy, UserPlus
 } from '@phosphor-icons/react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator
+} from '../components/ui/dropdown-menu';
 import { Button } from '../components/ui/button';
 import analytics from '../utils/analytics';
 
@@ -28,15 +32,18 @@ export default function Dashboard() {
   const [items, setItems] = useState([]);
   const [catalogue, setCatalogue] = useState([]);
   const [archivedLists, setArchivedLists] = useState([]);
-  const [basketComparison, setBasketComparison] = useState([]);
+  const [basketComparison, setBasketComparison] = useState({ grocery: [], medicine: [] });
   
   const [showCreateHome, setShowCreateHome] = useState(false);
   const [showJoinHome, setShowJoinHome] = useState(false);
   const [showCreateList, setShowCreateList] = useState(false);
   const [showAddItem, setShowAddItem] = useState(false);
   const [showPriceModal, setShowPriceModal] = useState(false);
+  const [showAddMember, setShowAddMember] = useState(false);
   const [selectedItemForPrices, setSelectedItemForPrices] = useState(null);
   const [itemPrices, setItemPrices] = useState([]);
+  const [addMemberEmail, setAddMemberEmail] = useState('');
+  const [addMemberMsg, setAddMemberMsg] = useState({ type: '', text: '' });
   
   const [searchQuery, setSearchQuery] = useState('');
   const [homeForm, setHomeForm] = useState({ home_name: '', home_id: '' });
@@ -55,6 +62,15 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (selectedHome) {
+      // Bug #4 fix: reset list/item state when switching homes.
+      // Note: these setState calls are intentional in this effect — they reset
+      // stale state from the previously-selected home before the new loaders fire.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSelectedList(null);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setItems([]);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setBasketComparison({ grocery: [], medicine: [] });
       loadLists();
       loadCatalogue();
       loadMembers();
@@ -81,19 +97,60 @@ export default function Dashboard() {
       console.error('Failed to load homes:', error);
     }
   }
+  // Bug #3 fix: reset selected list / items / basket when switching view modes
+  // so archived/completed state never leaks into the active view (and vice versa).
+  function switchViewMode(newMode) {
+    setSelectedList(null);
+    setItems([]);
+    setBasketComparison({ grocery: [], medicine: [] });
+    setViewMode(newMode);
+  }
+
   async function openHistoricalList(list, mode) {
     setSelectedList(list);
     setViewMode(mode);
+    // Bug #2 (already in earlier review): useEffect on selectedList will
+    // auto-load items and basket — no need to fetch items manually here.
+  }
 
+  // Close a historical (archived/completed) list — returns user to the list overview
+  function closeHistoricalList() {
+    setSelectedList(null);
+    setItems([]);
+    setBasketComparison({ grocery: [], medicine: [] });
+  }
+
+  // Copy home ID to clipboard so the user can share it with family
+  async function copyHomeId(homeId) {
     try {
-      const { data } = await axios.get(`${API}/items?list_id=${list._id}`, {
-        withCredentials: true,
-       });
-      setItems(data);
-    } catch (error) {
-      console.error('Failed to load historical list items:', error);
-   }
- }
+      await navigator.clipboard.writeText(homeId);
+      alert(`Home ID copied: ${homeId}`);
+    } catch (e) {
+      alert(`Home ID: ${homeId}`);
+    }
+  }
+
+  // Add a member to the currently selected home (creator only)
+  async function addMember(e) {
+    e.preventDefault();
+    setAddMemberMsg({ type: '', text: '' });
+    if (!selectedHome) return;
+    setLoading(true);
+    try {
+      await axios.post(
+        `${API}/homes/${selectedHome.home_id}/members`,
+        { email: addMemberEmail },
+        { withCredentials: true }
+      );
+      setAddMemberMsg({ type: 'success', text: `Added ${addMemberEmail} to the home.` });
+      setAddMemberEmail('');
+      await loadMembers();
+      await loadHomes();
+    } catch (err) {
+      setAddMemberMsg({ type: 'error', text: err.response?.data?.detail || 'Failed to add member' });
+    }
+    setLoading(false);
+  }
 //   async function loadCompletedLists() {
 //   try {
 //     const { data } = await axios.get(`${API}/lists/completed?home_id=${selectedHome.home_id}`, {
@@ -185,7 +242,16 @@ async function completeList() {
   async function loadBasketComparison() {
     try {
       const { data } = await axios.get(`${API}/lists/${selectedList._id}/basket`, { withCredentials: true });
-      setBasketComparison(data);
+      // Normalise response: backend now returns { grocery: [...], medicine: [...], baskets: [...] }
+      // Older callers may still receive a flat array — handle both shapes.
+      if (Array.isArray(data)) {
+        setBasketComparison({ grocery: data, medicine: [] });
+      } else {
+        setBasketComparison({
+          grocery: data.grocery || [],
+          medicine: data.medicine || [],
+        });
+      }
     } catch (error) {
       console.error('Failed to load basket comparison:', error);
     }
@@ -367,7 +433,9 @@ async function completeList() {
     if (!selectedList) return;
     try {
       await axios.post(`${API}/lists/${selectedList._id}/archive`, {}, { withCredentials: true });
-      const bestBasket = basketComparison.find(b => b.best);
+      // Best basket can come from either grocery or medicine group — use the cheapest overall.
+      const allBaskets = [...(basketComparison.grocery || []), ...(basketComparison.medicine || [])];
+      const bestBasket = allBaskets.find(b => b.best);
       const completedCount = items.filter(i => i.completed).length;
       const archiveProps = {
         list_id: String(selectedList._id),
@@ -454,15 +522,51 @@ async function completeList() {
             </div>
 
             <div className="flex items-center gap-2">
-              {selectedHome && (
-                <div className="hidden md:flex items-center gap-2 bg-[#F4F1EA] px-4 py-2 rounded-lg">
-                  <House size={16} weight="duotone" className="text-[#1A3626]" />
-                  <span className="text-sm font-medium text-[#1A3626]">{selectedHome.home_id}</span>
-                  <button className="text-[#8F9C93] hover:text-[#1A3626]" onClick={() => setSelectedHome(homes.find(h => h.home_id !== selectedHome.home_id) || homes[0])}>
-                    <ArrowsClockwise size={16} />
-                  </button>
-                </div>
+              {selectedHome && homes.length > 0 && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      className="hidden md:flex items-center gap-2 bg-[#F4F1EA] hover:bg-[#E8E5DC] px-4 py-2 rounded-lg transition-colors"
+                      data-testid="home-switcher-trigger"
+                    >
+                      <House size={16} weight="duotone" className="text-[#1A3626]" />
+                      <span className="text-sm font-medium text-[#1A3626]">{selectedHome.home_name || selectedHome.home_id}</span>
+                      <CaretDown size={14} className="text-[#8F9C93]" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="min-w-[240px]">
+                    {homes.map((h) => (
+                      <DropdownMenuItem
+                        key={h.home_id}
+                        onSelect={() => setSelectedHome(h)}
+                        data-testid={`switch-home-${h.home_id}`}
+                        className={selectedHome.home_id === h.home_id ? 'bg-[#F4F1EA] font-semibold' : ''}
+                      >
+                        <House size={14} weight="duotone" className="mr-2 text-[#1A3626]" />
+                        <div className="flex-1">
+                          <p className="text-sm">{h.home_name || h.home_id}</p>
+                          <p className="text-xs text-[#8F9C93] font-mono">{h.home_id}</p>
+                        </div>
+                      </DropdownMenuItem>
+                    ))}
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onSelect={() => setShowCreateHome(true)} data-testid="dropdown-create-home">
+                      <Plus size={14} weight="bold" className="mr-2" /> Create new home
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => setShowJoinHome(true)} data-testid="dropdown-join-home">
+                      <UserPlus size={14} weight="bold" className="mr-2" /> Join existing home
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               )}
+              <Link
+                to="/profile"
+                className="p-2 hover:bg-[#F4F1EA] rounded-lg"
+                title="Profile"
+                data-testid="profile-link"
+              >
+                <User size={20} weight="duotone" className="text-[#1A3626]" />
+              </Link>
               <button onClick={logout} className="p-2 hover:bg-[#F4F1EA] rounded-lg" data-testid="logout-button">
                 <SignOut size={20} weight="duotone" className="text-[#1A3626]" />
               </button>
@@ -501,10 +605,32 @@ async function completeList() {
                   </button>
                 </div>
                 <div className="text-sm text-[#4A5D4E] mb-2">{selectedHome.home_name}</div>
-                <div className="text-xs text-[#8F9C93] mb-3">{selectedHome.home_id}</div>
-                <div className="flex items-center gap-2 text-xs text-[#8F9C93]">
-                  <User size={14} />
-                  {members.length} member{members.length !== 1 ? 's' : ''}
+                <div className="flex items-center gap-2 mb-3">
+                  <code className="text-xs text-[#8F9C93] font-mono bg-[#F4F1EA] px-2 py-1 rounded">{selectedHome.home_id}</code>
+                  <button
+                    onClick={() => copyHomeId(selectedHome.home_id)}
+                    className="text-[#8F9C93] hover:text-[#1A3626]"
+                    title="Copy home ID — share this with family to let them join"
+                    data-testid="copy-home-id"
+                  >
+                    <Copy size={14} weight="duotone" />
+                  </button>
+                </div>
+                <div className="flex items-center justify-between text-xs text-[#8F9C93]">
+                  <div className="flex items-center gap-2">
+                    <User size={14} />
+                    {members.length} member{members.length !== 1 ? 's' : ''}
+                  </div>
+                  {selectedHome.is_creator && (
+                    <button
+                      onClick={() => { setAddMemberMsg({ type: '', text: '' }); setShowAddMember(true); }}
+                      className="text-[#FF6B35] hover:underline font-semibold flex items-center gap-1"
+                      data-testid="open-add-member"
+                    >
+                      <UserPlus size={14} weight="bold" />
+                      Add
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -523,11 +649,26 @@ async function completeList() {
                 </div>
               </div>
 
-              <div>
-                   <Button onClick={() => setViewMode('active')}>Active Lists</Button>
-                    <Button onClick={() => setViewMode('completed')}>Completed Lists</Button>
-                    <Button onClick={() => setViewMode('archived')}>Archived Lists</Button>
-                    <Button onClick={() => setViewMode('catalogue')}>Catalogue</Button>
+              <div className="bg-white border border-[#E8E5DC] rounded-2xl p-3 grid grid-cols-2 gap-2" data-testid="view-mode-tabs">
+                {[
+                  { key: 'active', label: 'Active' },
+                  { key: 'completed', label: 'Completed' },
+                  { key: 'archived', label: 'Archived' },
+                  { key: 'catalogue', label: 'Catalogue' },
+                ].map(tab => (
+                  <button
+                    key={tab.key}
+                    onClick={() => switchViewMode(tab.key)}
+                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      viewMode === tab.key
+                        ? 'bg-[#1A3626] text-white'
+                        : 'bg-[#F4F1EA] text-[#1A3626] hover:bg-[#E8E5DC]'
+                    }`}
+                    data-testid={`tab-${tab.key}`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
               </div>
               {/* Catalogue Search */}
               <div className="bg-white border border-[#E8E5DC] rounded-2xl p-6">
@@ -565,32 +706,96 @@ async function completeList() {
 
             {/* Main Content */}
             <div className="lg:col-span-9 space-y-6">
-              {viewMode === 'catalogue' ? (
-               <div className="bg-white rounded-3xl p-6 shadow-sm">
-               <h2 className="text-2xl font-bold mb-4">Complete Catalogue</h2>
-               <input
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search catalogue..."
-                  className="w-full border rounded-xl px-4 py-3 mb-4"/>
-
-              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {filteredCatalogue.map(item => (
-                <div key={item._id || item.name} className="border rounded-2xl p-4">
-                <h3 className="font-semibold">{item.name}</h3>
-                <p>{item.category}</p>
-                <p>Default unit: {item.unit}</p>
-                
-                {!isReadOnlyList && selectedList && (
-                    <Button onClick={() => addFromCatalogue(item)}>
-                      Add to Current List
-                    </Button>
-                )}
+              {/* Visual differentiation banner per view mode */}
+              {viewMode === 'archived' && (
+                <div className="rounded-2xl px-5 py-3 bg-[#8F9C93]/15 border border-[#8F9C93]/30 flex items-center gap-3" data-testid="banner-archived">
+                  <Archive size={20} weight="duotone" className="text-[#4A5D4E]" />
+                  <p className="text-sm text-[#4A5D4E]"><strong>Archived view</strong> · these lists are read-only history</p>
                 </div>
-            ))}
-            </div>
-            </div>
-          ):(
+              )}
+              {viewMode === 'completed' && (
+                <div className="rounded-2xl px-5 py-3 bg-[#2D6A4F]/10 border border-[#2D6A4F]/30 flex items-center gap-3" data-testid="banner-completed">
+                  <Check size={20} weight="duotone" className="text-[#2D6A4F]" />
+                  <p className="text-sm text-[#2D6A4F]"><strong>Completed view</strong> · these lists are read-only purchase history</p>
+                </div>
+              )}
+              {viewMode === 'catalogue' && (
+                <div className="rounded-2xl px-5 py-3 bg-[#FF6B35]/10 border border-[#FF6B35]/30 flex items-center gap-3" data-testid="banner-catalogue">
+                  <Package size={20} weight="duotone" className="text-[#FF6B35]" />
+                  <p className="text-sm text-[#1A3626]"><strong>Catalogue view</strong> · all items you&apos;ve ever added — click any to add to a list</p>
+                </div>
+              )}
+
+              {viewMode === 'catalogue' ? (
+                <div className="bg-white border border-[#E8E5DC] rounded-2xl p-6">
+                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
+                    <h2 className="text-2xl font-bold text-[#1A3626] font-heading">Complete Catalogue</h2>
+                    {/* List selector — pick which active list to add items to */}
+                    {lists.length > 0 && (
+                      <div className="flex items-center gap-2">
+                        <label className="text-xs text-[#8F9C93]">Add to:</label>
+                        <select
+                          value={selectedList?._id || ''}
+                          onChange={(e) => {
+                            const lst = lists.find(l => l._id === e.target.value);
+                            if (lst) setSelectedList(lst);
+                          }}
+                          className="bg-[#F4F1EA] border border-[#E8E5DC] rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-[#1A3626]"
+                          data-testid="catalogue-list-selector"
+                        >
+                          {lists.map(l => (
+                            <option key={l._id} value={l._id}>{l.frequency} List ({l.items_count} items)</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                  <input
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search catalogue..."
+                    className="w-full bg-[#FDFBF7] border-b-2 border-[#E8E5DC] px-0 py-2 focus:outline-none focus:border-[#1A3626] mb-4"
+                    data-testid="catalogue-main-search"
+                  />
+
+                  {filteredCatalogue.length === 0 ? (
+                    <div className="text-center py-12">
+                      <Package size={48} weight="duotone" className="text-[#8F9C93] mx-auto mb-3" />
+                      <p className="text-[#8F9C93]">No catalogue items yet. Items you add to any list will appear here automatically.</p>
+                    </div>
+                  ) : (
+                    <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {filteredCatalogue.map((item) => (
+                        <div
+                          key={item._id || item.name}
+                          className="border border-[#E8E5DC] rounded-xl p-4 flex flex-col gap-3 bg-white hover:shadow-md transition-shadow"
+                          data-testid={`catalogue-card-${item.name}`}
+                        >
+                          <div>
+                            <h3 className="font-bold text-[#1A3626]">{item.name}</h3>
+                            <p className="text-xs text-[#8F9C93]">{item.category} · default unit: {item.unit}</p>
+                          </div>
+                          {lists.length === 0 ? (
+                            <Button onClick={() => setShowCreateList(true)} variant="outline" size="sm" className="w-full">
+                              Create a list first
+                            </Button>
+                          ) : (
+                            <Button
+                              onClick={() => addFromCatalogue(item)}
+                              disabled={!selectedList}
+                              className="w-full bg-[#1A3626] hover:bg-[#2D6A4F]"
+                              data-testid={`catalogue-add-${item.name}`}
+                            >
+                              <Plus size={14} weight="bold" className="mr-1" />
+                              Add to {selectedList?.frequency || 'list'}
+                            </Button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ):(
             <>
               {/* Stats */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -612,43 +817,68 @@ async function completeList() {
                 </div>
               </div>
 
-              {/* Basket Comparison */}
+              {/* Basket Comparison — split into grocery and medicine groups.
+                  Each card is now an <a> link to the vendor's site so the user
+                  can jump straight to the shop after seeing the best deal. */}
               {activeItems.length > 0 && (
-                <div className="bg-white border border-[#E8E5DC] rounded-2xl p-6">
-                  <div className="flex items-center gap-2 mb-4">
-                    <Tag size={24} weight="duotone" className="text-[#FF6B35]" />
-                    <div>
-                      <h2 className="text-xl font-bold text-[#1A3626] font-heading">Basket Comparison</h2>
-                      <p className="text-sm text-[#8F9C93]">Total cost if you buy all items from one platform</p>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                    {basketComparison.map((basket) => (
-                      <div
-                        key={basket.vendor}
-                        className={`border-2 rounded-xl p-4 ${basket.best ? 'border-[#FF6B35] bg-[#FF6B35]/5' : 'border-[#E8E5DC]'}`}
-                        data-testid={`basket-${basket.vendor.toLowerCase().replace(/\s+/g, '-')}`}
-                      >
-                        <div className="flex items-start justify-between mb-2">
-                          <p className="text-sm font-semibold text-[#1A3626]">{basket.vendor}</p>
-                          {basket.best && <span className="text-xs bg-[#FF6B35] text-white px-2 py-0.5 rounded-full font-bold">BEST</span>}
+                <div className="space-y-6">
+                  {[
+                    { key: 'grocery', label: 'Grocery & Vegetable Basket', list: basketComparison.grocery || [] },
+                    { key: 'medicine', label: 'Medicine Basket', list: basketComparison.medicine || [] },
+                  ].filter(g => g.list.length > 0).map((group) => (
+                    <div key={group.key} className="bg-white border border-[#E8E5DC] rounded-2xl p-6">
+                      <div className="flex items-center gap-2 mb-4">
+                        <Tag size={24} weight="duotone" className="text-[#FF6B35]" />
+                        <div>
+                          <h2 className="text-xl font-bold text-[#1A3626] font-heading">{group.label}</h2>
+                          <p className="text-sm text-[#8F9C93]">Click a vendor to open their shop in a new tab</p>
                         </div>
-                        <p className="text-2xl font-bold text-[#1A3626]">{String.fromCharCode(8377)}{basket.total}</p>
-                        <p className="text-xs text-[#8F9C93] mt-1">
-                          {basket.best ? 'Lowest basket cost' : `${String.fromCharCode(8377)}${basket.savings} more`}
-                        </p>
                       </div>
-                    ))}
-                  </div>
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                        {group.list.map((basket) => (
+                          <a
+                            key={basket.vendor}
+                            href={basket.url || '#'}
+                            target="_blank"
+                            rel="noreferrer"
+                            className={`block border-2 rounded-xl p-4 transition hover:shadow-md hover:-translate-y-0.5 ${basket.best ? 'border-[#FF6B35] bg-[#FF6B35]/5' : 'border-[#E8E5DC] bg-white'}`}
+                            data-testid={`basket-${basket.vendor.toLowerCase().replace(/\s+/g, '-')}`}
+                          >
+                            <div className="flex items-start justify-between mb-2">
+                              <p className="text-sm font-semibold text-[#1A3626]">{basket.vendor}</p>
+                              {basket.best && <span className="text-xs bg-[#FF6B35] text-white px-2 py-0.5 rounded-full font-bold">BEST</span>}
+                            </div>
+                            <p className="text-2xl font-bold text-[#1A3626]">{String.fromCharCode(8377)}{basket.total}</p>
+                            <p className="text-xs text-[#8F9C93] mt-1">
+                              {basket.best ? 'Lowest basket cost' : `${String.fromCharCode(8377)}${basket.savings} more`}
+                            </p>
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
 
-              {/* Shopping List */}
+              {/* Shopping List — visual differentiation by viewMode */}
               {selectedList && (
-                <div className="bg-white border border-[#E8E5DC] rounded-2xl p-6">
+                <div
+                  className={`border rounded-2xl p-6 ${
+                    viewMode === 'archived'
+                      ? 'bg-[#8F9C93]/10 border-[#8F9C93]/40'
+                      : viewMode === 'completed'
+                      ? 'bg-[#2D6A4F]/5 border-[#2D6A4F]/40'
+                      : 'bg-white border-[#E8E5DC]'
+                  }`}
+                  data-testid={`shopping-list-${viewMode}`}
+                >
                   <div className="flex items-center justify-between mb-6">
                     <div>
-                      <h2 className="text-2xl font-bold text-[#1A3626] font-heading">{selectedList.frequency} List</h2>
+                      <h2 className="text-2xl font-bold text-[#1A3626] font-heading">
+                        {selectedList.frequency} List
+                        {viewMode === 'archived' && <span className="ml-2 text-sm font-medium text-[#4A5D4E] bg-[#8F9C93]/20 px-2 py-0.5 rounded-full">Archived</span>}
+                        {viewMode === 'completed' && <span className="ml-2 text-sm font-medium text-[#2D6A4F] bg-[#2D6A4F]/15 px-2 py-0.5 rounded-full">Completed</span>}
+                      </h2>
                       <p className="text-sm text-[#8F9C93]">{items.length} items total</p>
                     </div>
                     <div className="flex gap-2">
@@ -657,7 +887,7 @@ async function completeList() {
                         Share
                       </Button>
                       {!isReadOnlyList && (
-                        <Button onClick={completeList} variant="outline" size="sm">
+                        <Button onClick={completeList} variant="outline" size="sm" data-testid="complete-list-button">
                         <Check size={16} className="mr-2" />
                             Complete
                         </Button>
@@ -673,6 +903,17 @@ async function completeList() {
                           Archive
                           </Button>
                     )}
+                      {isReadOnlyList && (
+                        <Button
+                          onClick={closeHistoricalList}
+                          variant="outline"
+                          size="sm"
+                          data-testid="close-historical-list"
+                        >
+                          <X size={16} className="mr-2" />
+                          Close
+                        </Button>
+                      )}
                     </div>
                   </div>
 
@@ -763,44 +1004,71 @@ async function completeList() {
               )}
 
               {/* Archives */}
-              {viewMode === 'archived' && archivedLists.length > 0 && (
-                <div className="bg-white border border-[#E8E5DC] rounded-2xl p-6">
-                <div className="flex items-center gap-2 mb-4">
-                <Archive size={24} weight="duotone" className="text-[#1A3626]" />
-                <h2 className="text-xl font-bold text-[#1A3626] font-heading">Archived Lists</h2>
-                </div>
+              {viewMode === 'archived' && (
+                archivedLists.length > 0 ? (
+                  <div className="bg-white border border-[#E8E5DC] rounded-2xl p-6">
+                    <div className="flex items-center gap-2 mb-4">
+                      <Archive size={24} weight="duotone" className="text-[#1A3626]" />
+                      <h2 className="text-xl font-bold text-[#1A3626] font-heading">Archived Lists</h2>
+                    </div>
 
-                <div className="space-y-2">
-                    {archivedLists.map((list) => (
-                      <div key={list._id} className="flex items-center justify-between bg-[#F4F1EA] rounded-lg p-3">
-                        <div>
-                          <p className="text-sm font-medium text-[#1A3626]">{list.frequency} List</p>
-                          <p className="text-xs text-[#8F9C93]">{list.items_count} items</p>
+                    <div className="space-y-2">
+                      {archivedLists.map((list) => (
+                        <div key={list._id} className="flex items-center justify-between bg-[#F4F1EA] rounded-lg p-3">
+                          <div>
+                            <p className="text-sm font-medium text-[#1A3626]">{list.frequency} List</p>
+                            <p className="text-xs text-[#8F9C93]">{list.items_count} items</p>
+                          </div>
+                          <Button onClick={() => openHistoricalList(list, 'archived')} variant="outline" size="sm">
+                            View
+                          </Button>
                         </div>
-                        <Button onClick={() => openHistoricalList(list, 'archived')}>
-                              View
-                        </Button>
-                        {/* {!isReadOnlyList && (
-                           <Button onClick={archiveList} variant="outline" size="sm">
-                            <Archive size={16} className="mr-2" />
-                              Archive
-                           </Button>
-                        )} */}
-                      </div>
-                   ))}
-                </div>
-              </div>
-             )}
+                     ))}
+                    </div>
+                  </div>
+                ) : (
+                  // Bug #5 fix: empty state for archived view
+                  <div className="bg-white border border-[#E8E5DC] rounded-2xl p-12 text-center">
+                    <Archive size={48} weight="duotone" className="text-[#8F9C93] mx-auto mb-4" />
+                    <h3 className="text-lg font-bold text-[#1A3626] mb-1">No archived lists yet</h3>
+                    <p className="text-sm text-[#8F9C93]">Lists you archive will appear here for future reference.</p>
+                  </div>
+                )
+              )}
+
               {/* Completed Lists */}
-              {viewMode === 'completed' && completedLists.map(list => (
-              <div key={list._id}>
-              <p>{list.frequency} List</p>
-              <p>{list.items_count} items</p>
-              <Button onClick={() => openHistoricalList(list, 'completed')}>
-                     View
-              </Button>
-              </div>
-             ))}
+              {viewMode === 'completed' && (
+                completedLists.length > 0 ? (
+                  // Bug #8 fix: proper styling matching the Archived block
+                  <div className="bg-white border border-[#E8E5DC] rounded-2xl p-6">
+                    <div className="flex items-center gap-2 mb-4">
+                      <Check size={24} weight="duotone" className="text-[#2D6A4F]" />
+                      <h2 className="text-xl font-bold text-[#1A3626] font-heading">Completed Lists</h2>
+                    </div>
+
+                    <div className="space-y-2">
+                      {completedLists.map((list) => (
+                        <div key={list._id} className="flex items-center justify-between bg-[#F4F1EA] rounded-lg p-3">
+                          <div>
+                            <p className="text-sm font-medium text-[#1A3626]">{list.frequency} List</p>
+                            <p className="text-xs text-[#8F9C93]">{list.items_count} items</p>
+                          </div>
+                          <Button onClick={() => openHistoricalList(list, 'completed')} variant="outline" size="sm">
+                            View
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  // Bug #5 fix: empty state for completed view
+                  <div className="bg-white border border-[#E8E5DC] rounded-2xl p-12 text-center">
+                    <Check size={48} weight="duotone" className="text-[#8F9C93] mx-auto mb-4" />
+                    <h3 className="text-lg font-bold text-[#1A3626] mb-1">No completed lists yet</h3>
+                    <p className="text-sm text-[#8F9C93]">Mark a list as complete to track your purchase history here.</p>
+                  </div>
+                )
+              )}
             </>
           )}
             </div>
@@ -981,9 +1249,9 @@ async function completeList() {
           </DialogHeader>
           <div className="grid grid-cols-2 gap-3">
             {itemPrices.map((offer) => (
-              <a
+            <a
                 key={offer.vendor}
-                href={`https://www.google.com/search?q=${encodeURIComponent(offer.vendor + ' ' + (selectedItemForPrices?.name || ''))}`}
+                href={offer.url || `https://www.google.com/search?q=${encodeURIComponent(offer.vendor + ' ' + (selectedItemForPrices?.name || ''))}`}
                 target="_blank"
                 rel="noreferrer"
                 className={`border-2 rounded-xl p-4 price-card ${offer.best ? 'border-[#FF6B35] bg-[#FF6B35]/5' : 'border-[#E8E5DC]'}`}
@@ -999,6 +1267,40 @@ async function completeList() {
               </a>
             ))}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Member Modal — visible only to home creators */}
+      <Dialog open={showAddMember} onOpenChange={setShowAddMember}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Member to {selectedHome?.home_name}</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={addMember} className="space-y-4">
+            <p className="text-sm text-[#4A5D4E]">
+              Enter the email of a registered HomeCart user to add them to this home. They&apos;ll see all shared lists.
+            </p>
+            {addMemberMsg.text && (
+              <div className={`text-sm rounded-lg px-3 py-2 ${addMemberMsg.type === 'success' ? 'bg-[#2D6A4F]/10 text-[#2D6A4F] border border-[#2D6A4F]' : 'bg-[#D90429]/10 text-[#D90429] border border-[#D90429]'}`}>
+                {addMemberMsg.text}
+              </div>
+            )}
+            <input
+              type="email"
+              placeholder="member@example.com"
+              value={addMemberEmail}
+              onChange={(e) => setAddMemberEmail(e.target.value)}
+              className="w-full bg-[#FDFBF7] border-b-2 border-[#E8E5DC] px-0 py-2 focus:outline-none focus:border-[#1A3626]"
+              required
+              data-testid="add-member-email-input"
+            />
+            <div className="bg-[#F4F1EA] rounded-lg p-3 text-xs text-[#4A5D4E]">
+              <strong>Tip:</strong> You can also share your Home ID <code className="font-mono">{selectedHome?.home_id}</code> with family. They can use &quot;Join Home&quot; with this ID instead.
+            </div>
+            <Button type="submit" disabled={loading} className="w-full" data-testid="add-member-submit">
+              {loading ? 'Adding...' : 'Add Member'}
+            </Button>
+          </form>
         </DialogContent>
       </Dialog>
     </div>

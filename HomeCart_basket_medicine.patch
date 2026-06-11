@@ -1,0 +1,255 @@
+diff --git a/backend/server.py b/backend/server.py
+index 953e012..ce64510 100644
+--- a/backend/server.py
++++ b/backend/server.py
+@@ -104,7 +104,18 @@ class UpdateItemRequest(BaseModel):
+     completed: bool
+ 
+ # Price comparison logic (mock)
+-VENDORS = ["Amazon Fresh", "Blinkit", "BigBasket", "JioMart", "Zepto", "Swiggy Instamart"]
++# Grocery & vegetable items use quick-commerce vendors;
++# medicine items use pharmacy vendors. Each category routes to its own vendor list.
++GROCERY_VENDORS = ["Amazon Fresh", "Blinkit", "BigBasket", "JioMart", "Zepto", "Swiggy Instamart"]
++MEDICINE_VENDORS = ["1mg", "TrueMeds", "PharmEasy", "PlatinumRx", "Apollo Pharmacy"]
++
++# Kept for backwards-compatibility with any external callers that imported VENDORS.
++VENDORS = GROCERY_VENDORS
++
++MEDICINE_CATEGORIES = {"Medicines"}
++
++def vendors_for_category(category: str):
++    return MEDICINE_VENDORS if category in MEDICINE_CATEGORIES else GROCERY_VENDORS
+ 
+ # Bug #9 fix: real vendor search URLs (replaces previous Google search redirect).
+ # Each vendor's product search page is opened with the item name pre-filled.
+@@ -115,15 +126,40 @@ from urllib.parse import quote_plus
+ def vendor_search_url(vendor: str, item_name: str) -> str:
+     q = quote_plus(item_name)
+     urls = {
++        # Grocery vendors
+         "Amazon Fresh": f"https://www.amazon.in/s?k={q}&i=amazonfresh",
+         "Blinkit": f"https://blinkit.com/s/?q={q}",
+         "BigBasket": f"https://www.bigbasket.com/ps/?q={q}",
+         "JioMart": f"https://www.jiomart.com/search/{q}",
+         "Zepto": f"https://www.zeptonow.com/search?query={q}",
+         "Swiggy Instamart": f"https://www.swiggy.com/instamart/search?custom_back=true&query={q}",
++        # Medicine vendors
++        "1mg": f"https://www.1mg.com/search/all?name={q}",
++        "TrueMeds": f"https://www.truemeds.in/search/{q}",
++        "PharmEasy": f"https://pharmeasy.in/search/all?name={q}",
++        "PlatinumRx": f"https://www.platinumrx.in/search?q={q}",
++        "Apollo Pharmacy": f"https://www.apollopharmacy.in/search-medicines/{q}",
+     }
+     return urls.get(vendor, f"https://www.google.com/search?q={quote_plus(vendor + ' ' + item_name)}")
+ 
++# Vendor homepage / landing URL — used for the basket card click-through
++# (since a basket spans multiple items, we send the user to the vendor's main shop page).
++def vendor_home_url(vendor: str) -> str:
++    urls = {
++        "Amazon Fresh": "https://www.amazon.in/amazonfresh",
++        "Blinkit": "https://blinkit.com/",
++        "BigBasket": "https://www.bigbasket.com/",
++        "JioMart": "https://www.jiomart.com/",
++        "Zepto": "https://www.zeptonow.com/",
++        "Swiggy Instamart": "https://www.swiggy.com/instamart",
++        "1mg": "https://www.1mg.com/",
++        "TrueMeds": "https://www.truemeds.in/",
++        "PharmEasy": "https://pharmeasy.in/",
++        "PlatinumRx": "https://www.platinumrx.in/",
++        "Apollo Pharmacy": "https://www.apollopharmacy.in/",
++    }
++    return urls.get(vendor, "https://www.google.com/search?q=" + quote_plus(vendor))
++
+ def calculate_price(item_name: str, vendor: str, quantity: float) -> float:
+     seed = sum(ord(ch) for ch in item_name + vendor)
+     base = 35 + (seed % 250)
+@@ -482,8 +518,13 @@ async def get_item_prices(item_id: str, request: Request):
+     if not is_member:
+         raise HTTPException(status_code=403, detail="Not authorized")
+     
++    # Route to the correct vendor group based on item category.
++    # Medicine items are compared across pharmacy vendors;
++    # everything else uses grocery quick-commerce vendors.
++    applicable_vendors = vendors_for_category(item.get("category", ""))
++
+     prices = []
+-    for vendor in VENDORS:
++    for vendor in applicable_vendors:
+         price = calculate_price(item["name"], vendor, item["quantity"])
+         eta = f"{10 + ((len(item['name']) + len(vendor)) % 35)} min"
+         coupon = "Coupon applied" if (len(item['name']) + len(vendor)) % 4 == 0 else ""
+@@ -515,18 +556,39 @@ async def get_basket_comparison(list_id: str, request: Request):
+     
+     items = await db.list_items.find({"list_id": list_id, "completed": False}).to_list(1000)
+     
+-    basket_totals = []
+-    for vendor in VENDORS:
+-        total = sum(calculate_price(item["name"], vendor, item["quantity"]) for item in items)
+-        basket_totals.append({"vendor": vendor, "total": round(total, 2)})
+-    
+-    if basket_totals:
+-        min_total = min(b["total"] for b in basket_totals)
+-        for basket in basket_totals:
+-            basket["best"] = basket["total"] == min_total
+-            basket["savings"] = round(basket["total"] - min_total, 2)
+-    
+-    return basket_totals
++    # Split items by vendor group (grocery vs medicine).
++    grocery_items = [i for i in items if i.get("category") not in MEDICINE_CATEGORIES]
++    medicine_items = [i for i in items if i.get("category") in MEDICINE_CATEGORIES]
++
++    def build_group(group_items, vendor_list):
++        if not group_items:
++            return []
++        totals = []
++        for vendor in vendor_list:
++            total = sum(calculate_price(i["name"], vendor, i["quantity"]) for i in group_items)
++            totals.append({
++                "vendor": vendor,
++                "total": round(total, 2),
++                "url": vendor_home_url(vendor),  # clickable basket card
++                "item_count": len(group_items),
++            })
++        min_total = min(b["total"] for b in totals)
++        for b in totals:
++            b["best"] = b["total"] == min_total
++            b["savings"] = round(b["total"] - min_total, 2)
++        return totals
++
++    # Return both groups so the frontend can render two basket comparison sections.
++    # 'baskets' (flat list) is also returned for backwards-compatibility with the
++    # previous frontend that only knew about a single grocery basket.
++    grocery_basket = build_group(grocery_items, GROCERY_VENDORS)
++    medicine_basket = build_group(medicine_items, MEDICINE_VENDORS)
++
++    return {
++        "grocery": grocery_basket,
++        "medicine": medicine_basket,
++        "baskets": grocery_basket,  # legacy/back-compat — primary basket for grocery list
++    }
+ 
+ app.include_router(api_router)
+ 
+diff --git a/frontend/src/pages/Dashboard.js b/frontend/src/pages/Dashboard.js
+index 9f7e20e..7076882 100644
+--- a/frontend/src/pages/Dashboard.js
++++ b/frontend/src/pages/Dashboard.js
+@@ -28,7 +28,7 @@ export default function Dashboard() {
+   const [items, setItems] = useState([]);
+   const [catalogue, setCatalogue] = useState([]);
+   const [archivedLists, setArchivedLists] = useState([]);
+-  const [basketComparison, setBasketComparison] = useState([]);
++  const [basketComparison, setBasketComparison] = useState({ grocery: [], medicine: [] });
+   
+   const [showCreateHome, setShowCreateHome] = useState(false);
+   const [showJoinHome, setShowJoinHome] = useState(false);
+@@ -90,7 +90,7 @@ export default function Dashboard() {
+   function switchViewMode(newMode) {
+     setSelectedList(null);
+     setItems([]);
+-    setBasketComparison([]);
++    setBasketComparison({ grocery: [], medicine: [] });
+     setViewMode(newMode);
+   }
+ 
+@@ -191,7 +191,16 @@ async function completeList() {
+   async function loadBasketComparison() {
+     try {
+       const { data } = await axios.get(`${API}/lists/${selectedList._id}/basket`, { withCredentials: true });
+-      setBasketComparison(data);
++      // Normalise response: backend now returns { grocery: [...], medicine: [...], baskets: [...] }
++      // Older callers may still receive a flat array — handle both shapes.
++      if (Array.isArray(data)) {
++        setBasketComparison({ grocery: data, medicine: [] });
++      } else {
++        setBasketComparison({
++          grocery: data.grocery || [],
++          medicine: data.medicine || [],
++        });
++      }
+     } catch (error) {
+       console.error('Failed to load basket comparison:', error);
+     }
+@@ -373,7 +382,9 @@ async function completeList() {
+     if (!selectedList) return;
+     try {
+       await axios.post(`${API}/lists/${selectedList._id}/archive`, {}, { withCredentials: true });
+-      const bestBasket = basketComparison.find(b => b.best);
++      // Best basket can come from either grocery or medicine group — use the cheapest overall.
++      const allBaskets = [...(basketComparison.grocery || []), ...(basketComparison.medicine || [])];
++      const bestBasket = allBaskets.find(b => b.best);
+       const completedCount = items.filter(i => i.completed).length;
+       const archiveProps = {
+         list_id: String(selectedList._id),
+@@ -618,34 +629,46 @@ async function completeList() {
+                 </div>
+               </div>
+ 
+-              {/* Basket Comparison */}
++              {/* Basket Comparison — split into grocery and medicine groups.
++                  Each card is now an <a> link to the vendor's site so the user
++                  can jump straight to the shop after seeing the best deal. */}
+               {activeItems.length > 0 && (
+-                <div className="bg-white border border-[#E8E5DC] rounded-2xl p-6">
+-                  <div className="flex items-center gap-2 mb-4">
+-                    <Tag size={24} weight="duotone" className="text-[#FF6B35]" />
+-                    <div>
+-                      <h2 className="text-xl font-bold text-[#1A3626] font-heading">Basket Comparison</h2>
+-                      <p className="text-sm text-[#8F9C93]">Total cost if you buy all items from one platform</p>
+-                    </div>
+-                  </div>
+-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+-                    {basketComparison.map((basket) => (
+-                      <div
+-                        key={basket.vendor}
+-                        className={`border-2 rounded-xl p-4 ${basket.best ? 'border-[#FF6B35] bg-[#FF6B35]/5' : 'border-[#E8E5DC]'}`}
+-                        data-testid={`basket-${basket.vendor.toLowerCase().replace(/\s+/g, '-')}`}
+-                      >
+-                        <div className="flex items-start justify-between mb-2">
+-                          <p className="text-sm font-semibold text-[#1A3626]">{basket.vendor}</p>
+-                          {basket.best && <span className="text-xs bg-[#FF6B35] text-white px-2 py-0.5 rounded-full font-bold">BEST</span>}
++                <div className="space-y-6">
++                  {[
++                    { key: 'grocery', label: 'Grocery & Vegetable Basket', list: basketComparison.grocery || [] },
++                    { key: 'medicine', label: 'Medicine Basket', list: basketComparison.medicine || [] },
++                  ].filter(g => g.list.length > 0).map((group) => (
++                    <div key={group.key} className="bg-white border border-[#E8E5DC] rounded-2xl p-6">
++                      <div className="flex items-center gap-2 mb-4">
++                        <Tag size={24} weight="duotone" className="text-[#FF6B35]" />
++                        <div>
++                          <h2 className="text-xl font-bold text-[#1A3626] font-heading">{group.label}</h2>
++                          <p className="text-sm text-[#8F9C93]">Click a vendor to open their shop in a new tab</p>
+                         </div>
+-                        <p className="text-2xl font-bold text-[#1A3626]">{String.fromCharCode(8377)}{basket.total}</p>
+-                        <p className="text-xs text-[#8F9C93] mt-1">
+-                          {basket.best ? 'Lowest basket cost' : `${String.fromCharCode(8377)}${basket.savings} more`}
+-                        </p>
+                       </div>
+-                    ))}
+-                  </div>
++                      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
++                        {group.list.map((basket) => (
++                          <a
++                            key={basket.vendor}
++                            href={basket.url || '#'}
++                            target="_blank"
++                            rel="noreferrer"
++                            className={`block border-2 rounded-xl p-4 transition hover:shadow-md hover:-translate-y-0.5 ${basket.best ? 'border-[#FF6B35] bg-[#FF6B35]/5' : 'border-[#E8E5DC] bg-white'}`}
++                            data-testid={`basket-${basket.vendor.toLowerCase().replace(/\s+/g, '-')}`}
++                          >
++                            <div className="flex items-start justify-between mb-2">
++                              <p className="text-sm font-semibold text-[#1A3626]">{basket.vendor}</p>
++                              {basket.best && <span className="text-xs bg-[#FF6B35] text-white px-2 py-0.5 rounded-full font-bold">BEST</span>}
++                            </div>
++                            <p className="text-2xl font-bold text-[#1A3626]">{String.fromCharCode(8377)}{basket.total}</p>
++                            <p className="text-xs text-[#8F9C93] mt-1">
++                              {basket.best ? 'Lowest basket cost' : `${String.fromCharCode(8377)}${basket.savings} more`}
++                            </p>
++                          </a>
++                        ))}
++                      </div>
++                    </div>
++                  ))}
+                 </div>
+               )}
+ 

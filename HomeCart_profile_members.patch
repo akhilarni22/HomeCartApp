@@ -1,0 +1,873 @@
+diff --git a/frontend/src/pages/Profile.js b/frontend/src/pages/Profile.js
+new file mode 100644
+index 0000000..0e44e36
+--- /dev/null
++++ b/frontend/src/pages/Profile.js
+@@ -0,0 +1,258 @@
++import React, { useState, useEffect } from 'react';
++import { Link, useNavigate } from 'react-router-dom';
++import axios from 'axios';
++import { ArrowLeft, User, House, Lock, Trash, UserMinus, ChartBar, SignOut } from '@phosphor-icons/react';
++import { useAuth } from '../contexts/AuthContext';
++import { Button } from '../components/ui/button';
++
++const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
++
++export default function Profile() {
++  const { user, logout } = useAuth();
++  const navigate = useNavigate();
++
++  const [stats, setStats] = useState({ lists_created: 0, homes_owned: 0, items_added: 0 });
++  const [homes, setHomes] = useState([]);
++  const [membersByHome, setMembersByHome] = useState({});
++  const [pw, setPw] = useState({ current_password: '', new_password: '', confirm: '' });
++  const [pwMsg, setPwMsg] = useState({ type: '', text: '' });
++  const [pwLoading, setPwLoading] = useState(false);
++
++  useEffect(() => {
++    loadStats();
++    loadHomes();
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, []);
++
++  async function loadStats() {
++    try {
++      const { data } = await axios.get(`${API}/users/me/stats`, { withCredentials: true });
++      setStats(data);
++    } catch (e) { /* no-op */ }
++  }
++
++  async function loadHomes() {
++    try {
++      const { data } = await axios.get(`${API}/homes`, { withCredentials: true });
++      setHomes(data);
++      for (const h of data) {
++        loadMembers(h.home_id);
++      }
++    } catch (e) { /* no-op */ }
++  }
++
++  async function loadMembers(homeId) {
++    try {
++      const { data } = await axios.get(`${API}/homes/${homeId}/members`, { withCredentials: true });
++      setMembersByHome((prev) => ({ ...prev, [homeId]: data }));
++    } catch (e) { /* no-op */ }
++  }
++
++  async function changePassword(e) {
++    e.preventDefault();
++    setPwMsg({ type: '', text: '' });
++    if (pw.new_password !== pw.confirm) {
++      setPwMsg({ type: 'error', text: 'New password and confirmation do not match' });
++      return;
++    }
++    setPwLoading(true);
++    try {
++      await axios.post(`${API}/auth/change-password`, {
++        current_password: pw.current_password,
++        new_password: pw.new_password,
++      }, { withCredentials: true });
++      setPwMsg({ type: 'success', text: 'Password updated successfully' });
++      setPw({ current_password: '', new_password: '', confirm: '' });
++    } catch (err) {
++      setPwMsg({ type: 'error', text: err.response?.data?.detail || 'Failed to update password' });
++    }
++    setPwLoading(false);
++  }
++
++  async function removeMember(homeId, email) {
++    if (!window.confirm(`Remove ${email} from this home?`)) return;
++    try {
++      await axios.delete(`${API}/homes/${homeId}/members/${encodeURIComponent(email)}`, { withCredentials: true });
++      loadMembers(homeId);
++      loadHomes();
++    } catch (err) {
++      alert(err.response?.data?.detail || 'Failed to remove member');
++    }
++  }
++
++  async function deleteHome(homeId) {
++    if (!window.confirm(`Delete this home? This will permanently delete all lists, items, and members. This cannot be undone.`)) return;
++    try {
++      await axios.delete(`${API}/homes/${homeId}`, { withCredentials: true });
++      loadHomes();
++      loadStats();
++    } catch (err) {
++      alert(err.response?.data?.detail || 'Failed to delete home');
++    }
++  }
++
++  return (
++    <div className="min-h-screen bg-[#FDFBF7]">
++      <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-xl border-b border-[#E8E5DC]">
++        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
++          <Link to="/dashboard" className="flex items-center gap-2 text-[#1A3626] hover:text-[#FF6B35] font-medium" data-testid="back-to-dashboard">
++            <ArrowLeft size={20} weight="bold" />
++            Back to Dashboard
++          </Link>
++          <button onClick={async () => { await logout(); navigate('/login'); }} className="flex items-center gap-2 text-[#1A3626] hover:text-[#FF6B35] font-medium" data-testid="profile-logout">
++            <SignOut size={20} weight="duotone" />
++            Logout
++          </button>
++        </div>
++      </header>
++
++      <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
++        {/* Profile Header */}
++        <div className="bg-white border border-[#E8E5DC] rounded-2xl p-6">
++          <div className="flex items-center gap-4">
++            <div className="w-16 h-16 bg-[#1A3626] rounded-full flex items-center justify-center">
++              <User size={32} weight="duotone" className="text-[#FDFBF7]" />
++            </div>
++            <div>
++              <h1 className="text-2xl font-black tracking-tight text-[#1A3626] font-heading">{user?.name || 'User'}</h1>
++              <p className="text-sm text-[#4A5D4E]">{user?.email}</p>
++            </div>
++          </div>
++        </div>
++
++        {/* Stats */}
++        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
++          <div className="bg-white border border-[#E8E5DC] rounded-xl p-5">
++            <div className="flex items-center gap-2 mb-2">
++              <ChartBar size={20} weight="duotone" className="text-[#FF6B35]" />
++              <p className="text-xs text-[#8F9C93] uppercase tracking-wider">Lists Created</p>
++            </div>
++            <p className="text-3xl font-bold text-[#1A3626]" data-testid="stat-lists">{stats.lists_created}</p>
++          </div>
++          <div className="bg-white border border-[#E8E5DC] rounded-xl p-5">
++            <div className="flex items-center gap-2 mb-2">
++              <House size={20} weight="duotone" className="text-[#FF6B35]" />
++              <p className="text-xs text-[#8F9C93] uppercase tracking-wider">Homes Owned</p>
++            </div>
++            <p className="text-3xl font-bold text-[#1A3626]" data-testid="stat-homes">{stats.homes_owned}</p>
++          </div>
++          <div className="bg-white border border-[#E8E5DC] rounded-xl p-5">
++            <div className="flex items-center gap-2 mb-2">
++              <User size={20} weight="duotone" className="text-[#FF6B35]" />
++              <p className="text-xs text-[#8F9C93] uppercase tracking-wider">Items Added</p>
++            </div>
++            <p className="text-3xl font-bold text-[#1A3626]" data-testid="stat-items">{stats.items_added}</p>
++          </div>
++        </div>
++
++        {/* Change Password */}
++        <div className="bg-white border border-[#E8E5DC] rounded-2xl p-6">
++          <div className="flex items-center gap-2 mb-4">
++            <Lock size={24} weight="duotone" className="text-[#1A3626]" />
++            <h2 className="text-xl font-bold text-[#1A3626] font-heading">Change Password</h2>
++          </div>
++          <form onSubmit={changePassword} className="space-y-4 max-w-md">
++            {pwMsg.text && (
++              <div className={`text-sm rounded-lg px-3 py-2 ${pwMsg.type === 'success' ? 'bg-[#2D6A4F]/10 text-[#2D6A4F] border border-[#2D6A4F]' : 'bg-[#D90429]/10 text-[#D90429] border border-[#D90429]'}`}>
++                {pwMsg.text}
++              </div>
++            )}
++            <input
++              type="password"
++              placeholder="Current password"
++              value={pw.current_password}
++              onChange={(e) => setPw({ ...pw, current_password: e.target.value })}
++              className="w-full bg-[#FDFBF7] border-b-2 border-[#E8E5DC] px-0 py-2 focus:outline-none focus:border-[#1A3626]"
++              required
++              data-testid="current-password-input"
++            />
++            <input
++              type="password"
++              placeholder="New password (min 6 chars)"
++              value={pw.new_password}
++              onChange={(e) => setPw({ ...pw, new_password: e.target.value })}
++              className="w-full bg-[#FDFBF7] border-b-2 border-[#E8E5DC] px-0 py-2 focus:outline-none focus:border-[#1A3626]"
++              required
++              minLength={6}
++              data-testid="new-password-input"
++            />
++            <input
++              type="password"
++              placeholder="Confirm new password"
++              value={pw.confirm}
++              onChange={(e) => setPw({ ...pw, confirm: e.target.value })}
++              className="w-full bg-[#FDFBF7] border-b-2 border-[#E8E5DC] px-0 py-2 focus:outline-none focus:border-[#1A3626]"
++              required
++              minLength={6}
++              data-testid="confirm-password-input"
++            />
++            <Button type="submit" disabled={pwLoading} data-testid="change-password-submit">
++              {pwLoading ? 'Updating...' : 'Update Password'}
++            </Button>
++          </form>
++        </div>
++
++        {/* Manage Homes */}
++        <div className="bg-white border border-[#E8E5DC] rounded-2xl p-6">
++          <div className="flex items-center gap-2 mb-4">
++            <House size={24} weight="duotone" className="text-[#1A3626]" />
++            <h2 className="text-xl font-bold text-[#1A3626] font-heading">My Homes</h2>
++          </div>
++          {homes.length === 0 ? (
++            <p className="text-sm text-[#8F9C93]">You&apos;re not part of any home yet.</p>
++          ) : (
++            <div className="space-y-4">
++              {homes.map((home) => (
++                <div key={home.home_id} className="border border-[#E8E5DC] rounded-xl p-4" data-testid={`profile-home-${home.home_id}`}>
++                  <div className="flex items-start justify-between mb-3">
++                    <div>
++                      <p className="font-bold text-[#1A3626]">{home.home_name}</p>
++                      <p className="text-xs text-[#8F9C93] font-mono">{home.home_id}</p>
++                      <p className="text-xs text-[#4A5D4E] mt-1">
++                        {home.is_creator ? 'You are the creator' : 'Member'} • {home.members_count} member{home.members_count !== 1 ? 's' : ''}
++                      </p>
++                    </div>
++                    {home.is_creator && (
++                      <button
++                        onClick={() => deleteHome(home.home_id)}
++                        className="flex items-center gap-1 text-[#D90429] hover:bg-[#D90429]/10 px-3 py-1.5 rounded-lg text-sm font-medium"
++                        data-testid={`delete-home-${home.home_id}`}
++                      >
++                        <Trash size={16} weight="bold" />
++                        Delete Home
++                      </button>
++                    )}
++                  </div>
++                  {/* Members */}
++                  <div className="border-t border-[#E8E5DC] pt-3 mt-3">
++                    <p className="text-xs text-[#8F9C93] uppercase tracking-wider mb-2">Members</p>
++                    <div className="space-y-2">
++                      {(membersByHome[home.home_id] || []).map((m) => (
++                        <div key={m.email} className="flex items-center justify-between bg-[#F4F1EA] rounded-lg px-3 py-2">
++                          <div>
++                            <p className="text-sm font-medium text-[#1A3626]">{m.name || m.email}</p>
++                            <p className="text-xs text-[#8F9C93]">{m.email}{m.is_creator ? ' • Creator' : ''}</p>
++                          </div>
++                          {home.is_creator && !m.is_creator && (
++                            <button
++                              onClick={() => removeMember(home.home_id, m.email)}
++                              className="flex items-center gap-1 text-[#D90429] hover:bg-[#D90429]/10 px-2 py-1 rounded text-xs font-medium"
++                              data-testid={`remove-member-${m.email}`}
++                            >
++                              <UserMinus size={14} weight="bold" />
++                              Remove
++                            </button>
++                          )}
++                        </div>
++                      ))}
++                    </div>
++                  </div>
++                </div>
++              ))}
++            </div>
++          )}
++        </div>
++      </main>
++    </div>
++  );
++}
+diff --git a/backend/server.py b/backend/server.py
+index ce64510..f6deb10 100644
+--- a/backend/server.py
++++ b/backend/server.py
+@@ -103,6 +103,13 @@ class AddItemRequest(BaseModel):
+ class UpdateItemRequest(BaseModel):
+     completed: bool
+ 
++class AddMemberRequest(BaseModel):
++    email: EmailStr
++
++class ChangePasswordRequest(BaseModel):
++    current_password: str
++    new_password: str
++
+ # Price comparison logic (mock)
+ # Grocery & vegetable items use quick-commerce vendors;
+ # medicine items use pharmacy vendors. Each category routes to its own vendor list.
+@@ -280,6 +287,7 @@ async def get_my_homes(request: Request):
+     for home in homes:
+         members_count = await db.home_members.count_documents({"home_id": home["home_id"]})
+         home["members_count"] = members_count
++        home["is_creator"] = str(home.get("created_by", "")) == str(user["_id"])
+     
+     return homes
+ 
+@@ -292,8 +300,109 @@ async def get_home_members(home_id: str, request: Request):
+     
+     memberships = await db.home_members.find({"home_id": home_id}).to_list(100)
+     user_ids = [ObjectId(m["user_id"]) for m in memberships]
+-    users = await db.users.find({"_id": {"$in": user_ids}}, {"_id": 0, "email": 1, "name": 1}).to_list(100)
+-    return users
++    home = await db.homes.find_one({"home_id": home_id})
++    creator_id = home["created_by"] if home else None
++    users_cursor = await db.users.find({"_id": {"$in": user_ids}}, {"email": 1, "name": 1}).to_list(100)
++    return [
++        {
++            "_id": str(u["_id"]),
++            "email": u.get("email"),
++            "name": u.get("name", ""),
++            "is_creator": str(u["_id"]) == str(creator_id),
++        }
++        for u in users_cursor
++    ]
++
++
++@api_router.post("/homes/{home_id}/members")
++async def add_home_member(home_id: str, req: AddMemberRequest, request: Request):
++    """Add a registered user (by email) as a member of this home. Only the home creator can add members."""
++    user = await get_current_user(request)
++    home = await db.homes.find_one({"home_id": home_id})
++    if not home:
++        raise HTTPException(status_code=404, detail="Home not found")
++    if str(home["created_by"]) != str(user["_id"]):
++        raise HTTPException(status_code=403, detail="Only the home creator can add members")
++    target = await db.users.find_one({"email": req.email.lower()})
++    if not target:
++        raise HTTPException(status_code=404, detail="No registered user with that email")
++    target_id = str(target["_id"])
++    existing = await db.home_members.find_one({"home_id": home_id, "user_id": target_id})
++    if existing:
++        raise HTTPException(status_code=400, detail="User is already a member")
++    await db.home_members.insert_one({
++        "home_id": home_id,
++        "user_id": target_id,
++        "joined_at": datetime.now(timezone.utc),
++    })
++    return {"message": "Member added", "email": target["email"], "name": target.get("name", "")}
++
++
++@api_router.delete("/homes/{home_id}/members/{user_email}")
++async def remove_home_member(home_id: str, user_email: str, request: Request):
++    """Remove a member from a home. Only the home creator can remove members.
++    The creator themselves cannot be removed via this endpoint."""
++    user = await get_current_user(request)
++    home = await db.homes.find_one({"home_id": home_id})
++    if not home:
++        raise HTTPException(status_code=404, detail="Home not found")
++    if str(home["created_by"]) != str(user["_id"]):
++        raise HTTPException(status_code=403, detail="Only the home creator can remove members")
++    target = await db.users.find_one({"email": user_email.lower()})
++    if not target:
++        raise HTTPException(status_code=404, detail="User not found")
++    if str(target["_id"]) == str(home["created_by"]):
++        raise HTTPException(status_code=400, detail="Cannot remove the home creator")
++    result = await db.home_members.delete_one({"home_id": home_id, "user_id": str(target["_id"])})
++    if result.deleted_count == 0:
++        raise HTTPException(status_code=404, detail="Member not found in this home")
++    return {"message": "Member removed"}
++
++
++@api_router.delete("/homes/{home_id}")
++async def delete_home(home_id: str, request: Request):
++    """Delete a home and cascade-delete all its lists, items, catalogue and memberships.
++    Only the home creator can delete the home."""
++    user = await get_current_user(request)
++    home = await db.homes.find_one({"home_id": home_id})
++    if not home:
++        raise HTTPException(status_code=404, detail="Home not found")
++    if str(home["created_by"]) != str(user["_id"]):
++        raise HTTPException(status_code=403, detail="Only the home creator can delete the home")
++    await db.list_items.delete_many({"home_id": home_id})
++    await db.shopping_lists.delete_many({"home_id": home_id})
++    await db.catalogue_items.delete_many({"home_id": home_id})
++    await db.home_members.delete_many({"home_id": home_id})
++    await db.homes.delete_one({"home_id": home_id})
++    return {"message": "Home deleted"}
++
++
++@api_router.post("/auth/change-password")
++async def change_password(req: ChangePasswordRequest, request: Request):
++    user = await get_current_user(request)
++    db_user = await db.users.find_one({"_id": ObjectId(user["_id"])})
++    if not db_user or not verify_password(req.current_password, db_user["password_hash"]):
++        raise HTTPException(status_code=400, detail="Current password is incorrect")
++    if len(req.new_password) < 6:
++        raise HTTPException(status_code=400, detail="New password must be at least 6 characters")
++    await db.users.update_one(
++        {"_id": ObjectId(user["_id"])},
++        {"$set": {"password_hash": hash_password(req.new_password)}},
++    )
++    return {"message": "Password updated"}
++
++
++@api_router.get("/users/me/stats")
++async def get_user_stats(request: Request):
++    user = await get_current_user(request)
++    lists_created = await db.shopping_lists.count_documents({"created_by": user["_id"]})
++    homes_owned = await db.homes.count_documents({"created_by": user["_id"]})
++    items_added = await db.list_items.count_documents({"added_by": user["_id"]})
++    return {
++        "lists_created": lists_created,
++        "homes_owned": homes_owned,
++        "items_added": items_added,
++    }
+ 
+ # Shopping list endpoints
+ @api_router.post("/lists")
+diff --git a/frontend/src/App.js b/frontend/src/App.js
+index a8bc2ee..086a48a 100644
+--- a/frontend/src/App.js
++++ b/frontend/src/App.js
+@@ -6,6 +6,7 @@ import ProtectedRoute from './components/ProtectedRoute';
+ import Login from './pages/Login';
+ import Register from './pages/Register';
+ import Dashboard from './pages/Dashboard';
++import Profile from './pages/Profile';
+ import { Toaster } from './components/ui/sonner';
+ 
+ function Landing() {
+@@ -46,6 +47,14 @@ function App() {
+                 </ProtectedRoute>
+               }
+             />
++            <Route
++              path="/profile"
++              element={
++                <ProtectedRoute>
++                  <Profile />
++                </ProtectedRoute>
++              }
++            />
+           </Routes>
+         </BrowserRouter>
+         <Toaster />
+diff --git a/frontend/src/pages/Dashboard.js b/frontend/src/pages/Dashboard.js
+index 7076882..2cda91f 100644
+--- a/frontend/src/pages/Dashboard.js
++++ b/frontend/src/pages/Dashboard.js
+@@ -1,12 +1,16 @@
+ import React, { useState, useEffect, useMemo } from 'react';
++import { Link } from 'react-router-dom';
+ import { useAuth } from '../contexts/AuthContext';
+ import axios from 'axios';
+ import { motion, AnimatePresence } from 'framer-motion';
+ import {
+   ShoppingCart, House, Plus, Trash, Archive, Check, Share, MagnifyingGlass, 
+-  CaretDown, X, List as ListIcon, User, SignOut, Tag, ArrowsClockwise, Package, Pill, Carrot, Grains
++  CaretDown, X, List as ListIcon, User, SignOut, Tag, ArrowsClockwise, Package, Pill, Carrot, Grains, Copy, UserPlus
+ } from '@phosphor-icons/react';
+ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
++import {
++  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator
++} from '../components/ui/dropdown-menu';
+ import { Button } from '../components/ui/button';
+ import analytics from '../utils/analytics';
+ 
+@@ -35,8 +39,11 @@ export default function Dashboard() {
+   const [showCreateList, setShowCreateList] = useState(false);
+   const [showAddItem, setShowAddItem] = useState(false);
+   const [showPriceModal, setShowPriceModal] = useState(false);
++  const [showAddMember, setShowAddMember] = useState(false);
+   const [selectedItemForPrices, setSelectedItemForPrices] = useState(null);
+   const [itemPrices, setItemPrices] = useState([]);
++  const [addMemberEmail, setAddMemberEmail] = useState('');
++  const [addMemberMsg, setAddMemberMsg] = useState({ type: '', text: '' });
+   
+   const [searchQuery, setSearchQuery] = useState('');
+   const [homeForm, setHomeForm] = useState({ home_name: '', home_id: '' });
+@@ -55,10 +62,15 @@ export default function Dashboard() {
+ 
+   useEffect(() => {
+     if (selectedHome) {
+-      // Bug #4 fix: reset list/item state when switching homes
++      // Bug #4 fix: reset list/item state when switching homes.
++      // Note: these setState calls are intentional in this effect — they reset
++      // stale state from the previously-selected home before the new loaders fire.
++      // eslint-disable-next-line react-hooks/set-state-in-effect
+       setSelectedList(null);
++      // eslint-disable-next-line react-hooks/set-state-in-effect
+       setItems([]);
+-      setBasketComparison([]);
++      // eslint-disable-next-line react-hooks/set-state-in-effect
++      setBasketComparison({ grocery: [], medicine: [] });
+       loadLists();
+       loadCatalogue();
+       loadMembers();
+@@ -100,6 +112,45 @@ export default function Dashboard() {
+     // Bug #2 (already in earlier review): useEffect on selectedList will
+     // auto-load items and basket — no need to fetch items manually here.
+   }
++
++  // Close a historical (archived/completed) list — returns user to the list overview
++  function closeHistoricalList() {
++    setSelectedList(null);
++    setItems([]);
++    setBasketComparison({ grocery: [], medicine: [] });
++  }
++
++  // Copy home ID to clipboard so the user can share it with family
++  async function copyHomeId(homeId) {
++    try {
++      await navigator.clipboard.writeText(homeId);
++      alert(`Home ID copied: ${homeId}`);
++    } catch (e) {
++      alert(`Home ID: ${homeId}`);
++    }
++  }
++
++  // Add a member to the currently selected home (creator only)
++  async function addMember(e) {
++    e.preventDefault();
++    setAddMemberMsg({ type: '', text: '' });
++    if (!selectedHome) return;
++    setLoading(true);
++    try {
++      await axios.post(
++        `${API}/homes/${selectedHome.home_id}/members`,
++        { email: addMemberEmail },
++        { withCredentials: true }
++      );
++      setAddMemberMsg({ type: 'success', text: `Added ${addMemberEmail} to the home.` });
++      setAddMemberEmail('');
++      await loadMembers();
++      await loadHomes();
++    } catch (err) {
++      setAddMemberMsg({ type: 'error', text: err.response?.data?.detail || 'Failed to add member' });
++    }
++    setLoading(false);
++  }
+ //   async function loadCompletedLists() {
+ //   try {
+ //     const { data } = await axios.get(`${API}/lists/completed?home_id=${selectedHome.home_id}`, {
+@@ -471,15 +522,51 @@ async function completeList() {
+             </div>
+ 
+             <div className="flex items-center gap-2">
+-              {selectedHome && (
+-                <div className="hidden md:flex items-center gap-2 bg-[#F4F1EA] px-4 py-2 rounded-lg">
+-                  <House size={16} weight="duotone" className="text-[#1A3626]" />
+-                  <span className="text-sm font-medium text-[#1A3626]">{selectedHome.home_id}</span>
+-                  <button className="text-[#8F9C93] hover:text-[#1A3626]" onClick={() => setSelectedHome(homes.find(h => h.home_id !== selectedHome.home_id) || homes[0])}>
+-                    <ArrowsClockwise size={16} />
+-                  </button>
+-                </div>
++              {selectedHome && homes.length > 0 && (
++                <DropdownMenu>
++                  <DropdownMenuTrigger asChild>
++                    <button
++                      className="hidden md:flex items-center gap-2 bg-[#F4F1EA] hover:bg-[#E8E5DC] px-4 py-2 rounded-lg transition-colors"
++                      data-testid="home-switcher-trigger"
++                    >
++                      <House size={16} weight="duotone" className="text-[#1A3626]" />
++                      <span className="text-sm font-medium text-[#1A3626]">{selectedHome.home_name || selectedHome.home_id}</span>
++                      <CaretDown size={14} className="text-[#8F9C93]" />
++                    </button>
++                  </DropdownMenuTrigger>
++                  <DropdownMenuContent align="end" className="min-w-[240px]">
++                    {homes.map((h) => (
++                      <DropdownMenuItem
++                        key={h.home_id}
++                        onSelect={() => setSelectedHome(h)}
++                        data-testid={`switch-home-${h.home_id}`}
++                        className={selectedHome.home_id === h.home_id ? 'bg-[#F4F1EA] font-semibold' : ''}
++                      >
++                        <House size={14} weight="duotone" className="mr-2 text-[#1A3626]" />
++                        <div className="flex-1">
++                          <p className="text-sm">{h.home_name || h.home_id}</p>
++                          <p className="text-xs text-[#8F9C93] font-mono">{h.home_id}</p>
++                        </div>
++                      </DropdownMenuItem>
++                    ))}
++                    <DropdownMenuSeparator />
++                    <DropdownMenuItem onSelect={() => setShowCreateHome(true)} data-testid="dropdown-create-home">
++                      <Plus size={14} weight="bold" className="mr-2" /> Create new home
++                    </DropdownMenuItem>
++                    <DropdownMenuItem onSelect={() => setShowJoinHome(true)} data-testid="dropdown-join-home">
++                      <UserPlus size={14} weight="bold" className="mr-2" /> Join existing home
++                    </DropdownMenuItem>
++                  </DropdownMenuContent>
++                </DropdownMenu>
+               )}
++              <Link
++                to="/profile"
++                className="p-2 hover:bg-[#F4F1EA] rounded-lg"
++                title="Profile"
++                data-testid="profile-link"
++              >
++                <User size={20} weight="duotone" className="text-[#1A3626]" />
++              </Link>
+               <button onClick={logout} className="p-2 hover:bg-[#F4F1EA] rounded-lg" data-testid="logout-button">
+                 <SignOut size={20} weight="duotone" className="text-[#1A3626]" />
+               </button>
+@@ -518,10 +605,32 @@ async function completeList() {
+                   </button>
+                 </div>
+                 <div className="text-sm text-[#4A5D4E] mb-2">{selectedHome.home_name}</div>
+-                <div className="text-xs text-[#8F9C93] mb-3">{selectedHome.home_id}</div>
+-                <div className="flex items-center gap-2 text-xs text-[#8F9C93]">
+-                  <User size={14} />
+-                  {members.length} member{members.length !== 1 ? 's' : ''}
++                <div className="flex items-center gap-2 mb-3">
++                  <code className="text-xs text-[#8F9C93] font-mono bg-[#F4F1EA] px-2 py-1 rounded">{selectedHome.home_id}</code>
++                  <button
++                    onClick={() => copyHomeId(selectedHome.home_id)}
++                    className="text-[#8F9C93] hover:text-[#1A3626]"
++                    title="Copy home ID — share this with family to let them join"
++                    data-testid="copy-home-id"
++                  >
++                    <Copy size={14} weight="duotone" />
++                  </button>
++                </div>
++                <div className="flex items-center justify-between text-xs text-[#8F9C93]">
++                  <div className="flex items-center gap-2">
++                    <User size={14} />
++                    {members.length} member{members.length !== 1 ? 's' : ''}
++                  </div>
++                  {selectedHome.is_creator && (
++                    <button
++                      onClick={() => { setAddMemberMsg({ type: '', text: '' }); setShowAddMember(true); }}
++                      className="text-[#FF6B35] hover:underline font-semibold flex items-center gap-1"
++                      data-testid="open-add-member"
++                    >
++                      <UserPlus size={14} weight="bold" />
++                      Add
++                    </button>
++                  )}
+                 </div>
+               </div>
+ 
+@@ -540,11 +649,26 @@ async function completeList() {
+                 </div>
+               </div>
+ 
+-              <div>
+-                   <Button onClick={() => switchViewMode('active')}>Active Lists</Button>
+-                    <Button onClick={() => switchViewMode('completed')}>Completed Lists</Button>
+-                    <Button onClick={() => switchViewMode('archived')}>Archived Lists</Button>
+-                    <Button onClick={() => switchViewMode('catalogue')}>Catalogue</Button>
++              <div className="bg-white border border-[#E8E5DC] rounded-2xl p-3 grid grid-cols-2 gap-2" data-testid="view-mode-tabs">
++                {[
++                  { key: 'active', label: 'Active' },
++                  { key: 'completed', label: 'Completed' },
++                  { key: 'archived', label: 'Archived' },
++                  { key: 'catalogue', label: 'Catalogue' },
++                ].map(tab => (
++                  <button
++                    key={tab.key}
++                    onClick={() => switchViewMode(tab.key)}
++                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
++                      viewMode === tab.key
++                        ? 'bg-[#1A3626] text-white'
++                        : 'bg-[#F4F1EA] text-[#1A3626] hover:bg-[#E8E5DC]'
++                    }`}
++                    data-testid={`tab-${tab.key}`}
++                  >
++                    {tab.label}
++                  </button>
++                ))}
+               </div>
+               {/* Catalogue Search */}
+               <div className="bg-white border border-[#E8E5DC] rounded-2xl p-6">
+@@ -582,32 +706,96 @@ async function completeList() {
+ 
+             {/* Main Content */}
+             <div className="lg:col-span-9 space-y-6">
++              {/* Visual differentiation banner per view mode */}
++              {viewMode === 'archived' && (
++                <div className="rounded-2xl px-5 py-3 bg-[#8F9C93]/15 border border-[#8F9C93]/30 flex items-center gap-3" data-testid="banner-archived">
++                  <Archive size={20} weight="duotone" className="text-[#4A5D4E]" />
++                  <p className="text-sm text-[#4A5D4E]"><strong>Archived view</strong> · these lists are read-only history</p>
++                </div>
++              )}
++              {viewMode === 'completed' && (
++                <div className="rounded-2xl px-5 py-3 bg-[#2D6A4F]/10 border border-[#2D6A4F]/30 flex items-center gap-3" data-testid="banner-completed">
++                  <Check size={20} weight="duotone" className="text-[#2D6A4F]" />
++                  <p className="text-sm text-[#2D6A4F]"><strong>Completed view</strong> · these lists are read-only purchase history</p>
++                </div>
++              )}
++              {viewMode === 'catalogue' && (
++                <div className="rounded-2xl px-5 py-3 bg-[#FF6B35]/10 border border-[#FF6B35]/30 flex items-center gap-3" data-testid="banner-catalogue">
++                  <Package size={20} weight="duotone" className="text-[#FF6B35]" />
++                  <p className="text-sm text-[#1A3626]"><strong>Catalogue view</strong> · all items you&apos;ve ever added — click any to add to a list</p>
++                </div>
++              )}
++
+               {viewMode === 'catalogue' ? (
+-               <div className="bg-white rounded-3xl p-6 shadow-sm">
+-               <h2 className="text-2xl font-bold mb-4">Complete Catalogue</h2>
+-               <input
+-                  value={searchQuery}
+-                  onChange={(e) => setSearchQuery(e.target.value)}
+-                  placeholder="Search catalogue..."
+-                  className="w-full border rounded-xl px-4 py-3 mb-4"/>
++                <div className="bg-white border border-[#E8E5DC] rounded-2xl p-6">
++                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
++                    <h2 className="text-2xl font-bold text-[#1A3626] font-heading">Complete Catalogue</h2>
++                    {/* List selector — pick which active list to add items to */}
++                    {lists.length > 0 && (
++                      <div className="flex items-center gap-2">
++                        <label className="text-xs text-[#8F9C93]">Add to:</label>
++                        <select
++                          value={selectedList?._id || ''}
++                          onChange={(e) => {
++                            const lst = lists.find(l => l._id === e.target.value);
++                            if (lst) setSelectedList(lst);
++                          }}
++                          className="bg-[#F4F1EA] border border-[#E8E5DC] rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-[#1A3626]"
++                          data-testid="catalogue-list-selector"
++                        >
++                          {lists.map(l => (
++                            <option key={l._id} value={l._id}>{l.frequency} List ({l.items_count} items)</option>
++                          ))}
++                        </select>
++                      </div>
++                    )}
++                  </div>
++                  <input
++                    value={searchQuery}
++                    onChange={(e) => setSearchQuery(e.target.value)}
++                    placeholder="Search catalogue..."
++                    className="w-full bg-[#FDFBF7] border-b-2 border-[#E8E5DC] px-0 py-2 focus:outline-none focus:border-[#1A3626] mb-4"
++                    data-testid="catalogue-main-search"
++                  />
+ 
+-              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+-                {filteredCatalogue.map(item => (
+-                <div key={item._id || item.name} className="border rounded-2xl p-4">
+-                <h3 className="font-semibold">{item.name}</h3>
+-                <p>{item.category}</p>
+-                <p>Default unit: {item.unit}</p>
+-                
+-                {!isReadOnlyList && selectedList && (
+-                    <Button onClick={() => addFromCatalogue(item)}>
+-                      Add to Current List
+-                    </Button>
+-                )}
++                  {filteredCatalogue.length === 0 ? (
++                    <div className="text-center py-12">
++                      <Package size={48} weight="duotone" className="text-[#8F9C93] mx-auto mb-3" />
++                      <p className="text-[#8F9C93]">No catalogue items yet. Items you add to any list will appear here automatically.</p>
++                    </div>
++                  ) : (
++                    <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
++                      {filteredCatalogue.map((item) => (
++                        <div
++                          key={item._id || item.name}
++                          className="border border-[#E8E5DC] rounded-xl p-4 flex flex-col gap-3 bg-white hover:shadow-md transition-shadow"
++                          data-testid={`catalogue-card-${item.name}`}
++                        >
++                          <div>
++                            <h3 className="font-bold text-[#1A3626]">{item.name}</h3>
++                            <p className="text-xs text-[#8F9C93]">{item.category} · default unit: {item.unit}</p>
++                          </div>
++                          {lists.length === 0 ? (
++                            <Button onClick={() => setShowCreateList(true)} variant="outline" size="sm" className="w-full">
++                              Create a list first
++                            </Button>
++                          ) : (
++                            <Button
++                              onClick={() => addFromCatalogue(item)}
++                              disabled={!selectedList}
++                              className="w-full bg-[#1A3626] hover:bg-[#2D6A4F]"
++                              data-testid={`catalogue-add-${item.name}`}
++                            >
++                              <Plus size={14} weight="bold" className="mr-1" />
++                              Add to {selectedList?.frequency || 'list'}
++                            </Button>
++                          )}
++                        </div>
++                      ))}
++                    </div>
++                  )}
+                 </div>
+-            ))}
+-            </div>
+-            </div>
+-          ):(
++              ):(
+             <>
+               {/* Stats */}
+               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+@@ -672,12 +860,25 @@ async function completeList() {
+                 </div>
+               )}
+ 
+-              {/* Shopping List */}
++              {/* Shopping List — visual differentiation by viewMode */}
+               {selectedList && (
+-                <div className="bg-white border border-[#E8E5DC] rounded-2xl p-6">
++                <div
++                  className={`border rounded-2xl p-6 ${
++                    viewMode === 'archived'
++                      ? 'bg-[#8F9C93]/10 border-[#8F9C93]/40'
++                      : viewMode === 'completed'
++                      ? 'bg-[#2D6A4F]/5 border-[#2D6A4F]/40'
++                      : 'bg-white border-[#E8E5DC]'
++                  }`}
++                  data-testid={`shopping-list-${viewMode}`}
++                >
+                   <div className="flex items-center justify-between mb-6">
+                     <div>
+-                      <h2 className="text-2xl font-bold text-[#1A3626] font-heading">{selectedList.frequency} List</h2>
++                      <h2 className="text-2xl font-bold text-[#1A3626] font-heading">
++                        {selectedList.frequency} List
++                        {viewMode === 'archived' && <span className="ml-2 text-sm font-medium text-[#4A5D4E] bg-[#8F9C93]/20 px-2 py-0.5 rounded-full">Archived</span>}
++                        {viewMode === 'completed' && <span className="ml-2 text-sm font-medium text-[#2D6A4F] bg-[#2D6A4F]/15 px-2 py-0.5 rounded-full">Completed</span>}
++                      </h2>
+                       <p className="text-sm text-[#8F9C93]">{items.length} items total</p>
+                     </div>
+                     <div className="flex gap-2">
+@@ -686,7 +887,7 @@ async function completeList() {
+                         Share
+                       </Button>
+                       {!isReadOnlyList && (
+-                        <Button onClick={completeList} variant="outline" size="sm">
++                        <Button onClick={completeList} variant="outline" size="sm" data-testid="complete-list-button">
+                         <Check size={16} className="mr-2" />
+                             Complete
+                         </Button>
+@@ -702,6 +903,17 @@ async function completeList() {
+                           Archive
+                           </Button>
+                     )}
++                      {isReadOnlyList && (
++                        <Button
++                          onClick={closeHistoricalList}
++                          variant="outline"
++                          size="sm"
++                          data-testid="close-historical-list"
++                        >
++                          <X size={16} className="mr-2" />
++                          Close
++                        </Button>
++                      )}
+                     </div>
+                   </div>
+ 
+@@ -1057,6 +1269,40 @@ async function completeList() {
+           </div>
+         </DialogContent>
+       </Dialog>
++
++      {/* Add Member Modal — visible only to home creators */}
++      <Dialog open={showAddMember} onOpenChange={setShowAddMember}>
++        <DialogContent>
++          <DialogHeader>
++            <DialogTitle>Add Member to {selectedHome?.home_name}</DialogTitle>
++          </DialogHeader>
++          <form onSubmit={addMember} className="space-y-4">
++            <p className="text-sm text-[#4A5D4E]">
++              Enter the email of a registered HomeCart user to add them to this home. They&apos;ll see all shared lists.
++            </p>
++            {addMemberMsg.text && (
++              <div className={`text-sm rounded-lg px-3 py-2 ${addMemberMsg.type === 'success' ? 'bg-[#2D6A4F]/10 text-[#2D6A4F] border border-[#2D6A4F]' : 'bg-[#D90429]/10 text-[#D90429] border border-[#D90429]'}`}>
++                {addMemberMsg.text}
++              </div>
++            )}
++            <input
++              type="email"
++              placeholder="member@example.com"
++              value={addMemberEmail}
++              onChange={(e) => setAddMemberEmail(e.target.value)}
++              className="w-full bg-[#FDFBF7] border-b-2 border-[#E8E5DC] px-0 py-2 focus:outline-none focus:border-[#1A3626]"
++              required
++              data-testid="add-member-email-input"
++            />
++            <div className="bg-[#F4F1EA] rounded-lg p-3 text-xs text-[#4A5D4E]">
++              <strong>Tip:</strong> You can also share your Home ID <code className="font-mono">{selectedHome?.home_id}</code> with family. They can use &quot;Join Home&quot; with this ID instead.
++            </div>
++            <Button type="submit" disabled={loading} className="w-full" data-testid="add-member-submit">
++              {loading ? 'Adding...' : 'Add Member'}
++            </Button>
++          </form>
++        </DialogContent>
++      </Dialog>
+     </div>
+   );
+ }
